@@ -1,0 +1,28 @@
+{
+  "name": "fruitland",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Persboy — online fruit & vegetable store (single Next.js app: storefront + admin + courier + API routes)",
+  "workspaces": [
+    "app",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=app",
+    "build": "npm run build --workspace=app",
+    "start": "npm run start --workspace=app",
+    "lint": "npm run lint --workspace=app",
+    "typecheck": "npm run typecheck --workspace=app && npm run typecheck --workspace=@fruitland/shared",
+    "test": "npm run test --workspace=app",
+    "test:e2e": "playwright test",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

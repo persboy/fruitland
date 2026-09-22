@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --color-brand: #16a34a;
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family:
+    "Vazirmatn",
+    -apple-system,
+    "Segoe UI",
+    Tahoma,
+    Arial,
+    sans-serif;
+  background: #fafafa;
+  color: #111827;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
