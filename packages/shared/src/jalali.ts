@@ -1,3 +1,4 @@
+/// <reference path="./jalaali-js.d.ts" />
 import jalaali from "jalaali-js";
 
 /**

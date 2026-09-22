@@ -14,6 +14,7 @@
     "lint": "npm run lint --workspace=app",
     "typecheck": "npm run typecheck --workspace=app && npm run typecheck --workspace=@fruitland/shared",
     "test": "npm run test --workspace=app",
+    "test:integration": "npm run test:integration --workspace=app",
     "test:e2e": "playwright test",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
