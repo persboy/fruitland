@@ -4,8 +4,9 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 3 — Application Foundation (بخش «پایه‌ی احراز هویت» کامل شد؛ routing/layouts/UI system/API client هنوز باقی مانده)
+- **فاز:** Phase 3 — Application Foundation (کامل شد) — بعدی: Phase 4 Admin، شروع با صفحه‌ی ورود واقعی
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
+- **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
 - **ریپوی Legacy:** `persboy/fruit-veg-store-backend` — فقط رفرنس، read-only. یک اپ Next.js مونولیتیک با ۱۴۳ روت API، شامل Auth/Wallet/Referral/Discount/Orders/Reviews پیاده‌سازی‌شده. README آن قدیمی و گمراه‌کننده است (می‌گوید فاز ۱ Mock‌محور، ولی کد واقعی و متصل به DB است).
 
@@ -14,9 +15,16 @@
 ```
 /
 ├── app/                          @fruitland/app — اپ Next.js 16 (App Router)
+│   ├── public/fonts/              Vazirmatn[wght].woff2 + VAZIRMATN-OFL.txt (self-hosted، لایسنس OFL)
 │   ├── src/app/
-│   │   ├── layout.tsx (RTL/fa)، page.tsx (اسکلت موقت)
-│   │   └── api/v1/health, api/v1/auth/*        ۱۱ روت auth (پایین را ببینید)
+│   │   ├── layout.tsx (فقط html/body/fonts)، not-found.tsx، global-error.tsx
+│   │   ├── (storefront)/          layout.tsx (شل موبایل)، page.tsx، loading.tsx، error.tsx
+│   │   ├── admin/                 layout.tsx (شل دسکتاپ)، loading.tsx، error.tsx — هنوز page.tsx ندارد (Phase 4)
+│   │   ├── courier/               layout.tsx (شل موبایل)، loading.tsx، error.tsx — هنوز page.tsx ندارد (Phase 5)
+│   │   └── api/v1/health, api/v1/auth/*        ۱۱ روت auth
+│   ├── src/components/ui/         Button, Input, Card, Spinner, Skeleton, StateMessage (§۲۱ همه‌ی state ها)
+│   ├── src/lib/cn.ts               clsx+tailwind-merge combiner
+│   ├── src/lib/client/apiClient.ts  fetch wrapper سمت کلاینت (envelope-aware، auto-refresh روی ۴۰۱)
 │   └── src/lib/server/
 │       ├── env.ts, db.ts, apiResponse.ts   (Phase 1، env.ts حالا شامل تنظیمات auth هم هست)
 │       ├── errors/AppError.ts
@@ -43,8 +51,8 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - `npm run lint` (ESLint) در `app` — بدون خطا و بدون warning.
 - تست‌های واحد (Vitest):
   - `packages/shared`: ۵۱ تست (money.ts، jalali.ts، phone.ts، domain/enums.ts) — پاس.
-  - `app`: ۶۷ تست (apiResponse/AppError، env validation، ۱۸ مدل Mongoose، password.ts، jwt.ts) — پاس.
-- `npm run build --workspace=app` (Turbopack) — موفق؛ شامل ۱۱ روت auth + `/`, `/_not-found`, `/api/v1/health`.
+  - `app`: ۷۳ تست (apiResponse/AppError، env validation، ۱۸ مدل Mongoose، password.ts، jwt.ts، apiClient.ts) — پاس.
+- `npm run build --workspace=app` (Turbopack) — موفق؛ شامل ۱۱ روت auth + `/`, `/_not-found`, `/api/v1/health`. `/admin` و `/courier` هنوز روت تولید نمی‌کنند چون page.tsx ندارند (عمدی — Phase 4/5).
 - اجرای واقعی سرور production (`next start`) و تست دستی:
   - `GET /` → HTML صحیح با `lang="fa" dir="rtl"` و محتوای فارسی.
   - `GET /api/v1/health` → envelope استاندارد برگرداند (چون در محیط sandbox، MongoDB واقعی در دسترس نبود، پاسخ `error.code=HEALTH_CHECK_FAILED` بود — این رفتار **درست** است، نه باگ؛ envelope شکست را هم به‌درستی برمی‌گرداند).
@@ -69,7 +77,9 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 
 
-## Phase 3 — پایه‌ی احراز هویت (کامل شد)
+## Phase 3 — Application Foundation (کامل شد)
+
+### بخش ۱: پایه‌ی احراز هویت
 
 جزئیات کامل در `docs/auth.md`. خلاصه:
 
@@ -90,16 +100,46 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
   Rotation با Reuse Detection (توکن سرقتی/تکراری → ابطال همه‌ی نشست‌ها)، تغییر رمز = ابطال
   خودکار همه‌ی نشست‌ها.
 
+### بخش ۲: Routing، UI System، API Client
+
+- **طرح بصری («گرمای جعبه‌ی میوه»):** پس‌زمینه‌ی کرمِ گرم `#F7F0E1`، سبز برگی تیره
+  `brand-500 #3F6E3C` به‌عنوان رنگ اصلی/قابل‌اعتماد، نارنجی نارنگی `accent-500 #DB8B2C` فقط
+  برای CTA/برجسته‌سازی — عمداً نه ترکیب کرم+ترکوتای رایج AI (`#D97757`) و نه کارت‌های
+  یکسان‌شکل با سایه‌ی خاکستری تکراری. توکن‌ها در `app/src/app/globals.css` با Tailwind v4
+  `@theme` تعریف شده‌اند. فونت فارسی **Vazirmatn** (self-hosted، وریبل، از `public/fonts/`)
+  جایگزین fallback موقت فاز ۱ شد.
+- **Routing:** استفاده از Route Group `(storefront)` (بدون تأثیر در URL، فقط سازمان‌دهی)
+  + پوشه‌های واقعی `admin/` و `courier/` (چون این‌ها به پیشوند URL واقعی نیاز دارند). هر سه
+  layout جدای خودشان را دارند (استوِرفرانت/پیک: موبایل و max-width محدود؛ ادمین: تمام‌عرض
+  دسکتاپ، طبق §۱۰ Master Prompt). `admin/` و `courier/` عمداً هنوز `page.tsx` ندارند —
+  فقط لایه‌ی layout/loading/error پایه، بدون هیچ لینک مرده یا placeholder جعلی (§۳۸).
+- **کامپوننت‌های مشترک** (`src/components/ui/`): `Button`، `Input`، `Card`، `Spinner`،
+  `Skeleton`، `StateMessage` (یک کامپوننت عمومی برای همه‌ی حالت‌های empty/error/۴۰۴/network
+  به‌جای تکرار — طبق §۲۱ همه‌ی state های لازم پوشش داده شدند: loading/empty/error/not-found).
+  Focus ring قابل‌مشاهده سراسری در `globals.css` (§۲۸ دسترس‌پذیری).
+- **API Client سمت کلاینت** (`src/lib/client/apiClient.ts`): fetch wrapper آگاه از envelope
+  استاندارد سرور، خطاها را به `ApiClientError` تبدیل می‌کند، و روی خطای `۴۰۱` (انقضای Access
+  Token) به‌طور خودکار یک‌بار `refresh` می‌زند و درخواست را تکرار می‌کند — با de-duplication
+  برای درخواست‌های هم‌زمان (یک refresh مشترک، نه چندتا).
+- **صفحه‌ی اصلی storefront** بازنویسی شد با کامپوننت‌های جدید — همچنان محتوای صادقانه‌ی
+  «در حال ساخت» دارد (نه داده‌ی جعلی محصول، طبق §۲۲).
+
 ### تست‌ها
 
-- **۶۷ تست واحد** (بدون DB، شامل ۱۰ تست جدید برای مدل‌های Otp/RefreshToken + password.ts +
-  jwt.ts) — همه پاس.
+- **۷۳ تست واحد** (۶ تست جدید برای `apiClient.ts` با mock کردن `fetch` — پوشش: موفقیت،
+  خطای بدون auth، refresh-and-retry روی ۴۰۱، شکست refresh، عدم retry برای خود auth
+  endpointها، de-duplication چند درخواست هم‌زمان) — همه پاس.
 - **تست‌های یکپارچه‌ی واقعی نوشته شدند** (`otpService.integration.test.ts`،
   `authService.integration.test.ts`) — پوشش کامل: ادعای MASTER_ADMIN، cooldown/سقف/قفل OTP،
   قفل رمز ادمین، rotation + reuse detection، logout تک‌دستگاهی، بازیابی رمز، no-op ضد-شمارش.
   **در این sandbox اجرا نشدند** (همان محدودیت دانلود باینری MongoDB — بخش محدودیت‌ها را
   ببینید)؛ باید در dev/CI واقعی با `npm run test:integration` تأیید شوند.
-- `npm run verify` کامل (lint + typecheck + ۶۷ تست + build) — پاس.
+- `npm run verify` کامل (lint + typecheck + ۷۳ تست + build) — پاس.
+- **بررسی بصری واقعی (screenshot) انجام نشد** — این sandbox مرورگر/ابزار رندر تصویری ندارد
+  (همان محدودیت Playwright). طراحی فقط از طریق مرور کد و موفقیت build/typecheck تأیید شد؛
+  طبق §۲۴ Master Prompt («بازرسی واقعی UI»)، باید در محیط dev واقعی با چشم بررسی شود — به‌خصوص
+  در ۳۷۵px/۷۶۸px/۱۲۸۰px طبق پروتکل صفحه.
+
 
 
 
@@ -108,7 +148,7 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **Playwright e2e اجرا نشد.** دانلود باینری مرورگر Chromium از `cdn.playwright.dev` در sandbox فعلی مسدود است (خارج از allowlist شبکه). فایل `e2e/smoke.spec.ts` نوشته شده ولی تا اجرای واقعی در محیط dev/CI با دسترسی شبکه کامل، «تست‌شده» تلقی نشود.
 - **تست‌های یکپارچه‌ی مدل (`npm run test:integration`) اجرا نشدند.** همان محدودیت شبکه — دانلود باینری MongoDB از `fastdl.mongodb.org` مسدود است. فایل `persistence.integration.test.ts` (Phase 2) و `otpService.integration.test.ts`/`authService.integration.test.ts` (Phase 3) نوشته شده‌اند؛ باید در dev/CI واقعی اجرا و تأیید شوند.
 - **سرویس SMS واقعی هنوز انتخاب نشده.** فقط `ConsoleSmsProvider` (dev-only) وجود دارد. جزئیات و راه اضافه‌کردن provider واقعی در `docs/auth.md` §۸.
-- فونت فارسی (Vazirmatn) هنوز بارگذاری نشده؛ در globals.css فقط به‌عنوان fallback نام برده شده. این کار به فاز ۳ (Application Foundation / UI System) موکول شد.
+- **بررسی بصری واقعی (screenshot) طراحی UI انجام نشد.** این sandbox ابزار رندر/مرورگر تصویری ندارد. صفحات جدید (storefront/admin/courier shell) فقط با build/typecheck تأیید شدند، نه با چشم — باید طبق پروتکل صفحه (§۲۴ Master Prompt) در ۳۷۵px/۷۶۸px/۱۲۸۰px در محیط واقعی بررسی شوند.
 - axe accessibility testing هنوز راه‌اندازی نشده.
 - MongoDB واقعی برای dev/test در sandbox فعلی نصب نیست؛ اتصال فقط با کانفیگ صحیح تست شد، نه با DB واقعی در حال اجرا.
 
@@ -122,10 +162,12 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 ## مرحله‌ی بعد
 
-بخش «پایه‌ی احراز هویت» از Phase 3 کامل شد. باقیمانده‌ی Phase 3: routing/layouts، UI system،
-API client سمت فرانت، error/loading states، shared components — سپس شروع صفحات واقعی طبق
-نقشه‌ی راه (Phase 4 Admin، شروع با «Authentication» یعنی صفحه‌ی ورود واقعی که از همین
-API استفاده می‌کند).
+Phase 3 (پایه‌ی احراز هویت + routing/UI system/API client) کامل شد. مرحله‌ی بعد طبق نقشه‌ی
+راه: **Phase 4 — Admin، شروع با «Authentication»** یعنی صفحه‌ی ورود واقعی (`/admin` +
+`page.tsx` ورود با رمز عبور، فرم با `react-hook-form`+Zod، استفاده از `apiClient` برای
+`POST /api/v1/auth/login/password`)، طبق پروتکل کامل پیاده‌سازی صفحه (§۲۴ Master Prompt:
+Spec → Backend (آماده) → Frontend → Verification → Docs → Git → Stop).
 
 - در محیط dev/CI با دسترسی شبکه‌ی کامل: `npm run test:integration` و `npm run test:e2e` را اجرا و نتیجه را در این فایل ثبت کنید.
+- بررسی بصری واقعی (۳۷۵/۷۶۸/۱۲۸۰px) صفحات ساخته‌شده در این فاز، در محیط dev واقعی.
 - انتخاب سرویس واقعی SMS قبل از استقرار production لازم است (`docs/auth.md` §۸).

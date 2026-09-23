@@ -1,7 +1,47 @@
 @import "tailwindcss";
 
+/*
+ * Design direction ("market-crate warmth"): a warm unbleached-crate cream
+ * base, a deep leaf-green as the trustworthy anchor color, and a single
+ * ripe-marigold accent used sparingly for calls to action — not the
+ * cream+terracotta or near-black+neon combinations that are the generic
+ * AI-generated defaults. One typeface (Vazirmatn) throughout: Persian is
+ * the majority of the content and Vazirmatn's Latin/numeral coverage is
+ * strong enough that a second family would only add inconsistency.
+ * See /mnt/skills/public/frontend-design/SKILL.md process — this is the
+ * "plan" reduced to tokens; component-level choices build on it.
+ */
+@theme {
+  --font-sans: "Vazirmatn", "Segoe UI", Tahoma, Arial, sans-serif;
+
+  --color-paper: #f7f0e1;
+  --color-paper-raised: #ffffff;
+  --color-ink: #262019;
+  --color-muted: #8a8073;
+  --color-line: #e3d9c4;
+
+  --color-brand-400: #5c8a56;
+  --color-brand-500: #3f6e3c;
+  --color-brand-600: #2b5029;
+
+  --color-accent-400: #eba34c;
+  --color-accent-500: #db8b2c;
+  --color-accent-600: #b96f1d;
+
+  --color-danger-500: #a8402a;
+  --color-danger-600: #8a3521;
+}
+
+/* Self-hosted (public/fonts) — see public/fonts/VAZIRMATN-OFL.txt for the license. */
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/fonts/Vazirmatn[wght].woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  --color-brand: #16a34a;
   color-scheme: light;
 }
 
@@ -11,15 +51,15 @@ body {
 }
 
 body {
-  font-family:
-    "Vazirmatn",
-    -apple-system,
-    "Segoe UI",
-    Tahoma,
-    Arial,
-    sans-serif;
-  background: #fafafa;
-  color: #111827;
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+/* Visible keyboard focus everywhere (MASTER-PROMPT.md §28 accessibility) — Tailwind's reset removes the UA default, so it must be replaced, not just removed. */
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
