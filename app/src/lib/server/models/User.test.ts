@@ -63,4 +63,13 @@ describe("User schema", () => {
     const doc = new User({ phone: "09120000000", referredByUserId: new Types.ObjectId() });
     expect(doc.validateSync()).toBeUndefined();
   });
+
+  it("defaults passwordFailedAttempts to 0 and strips password fields from toJSON even if set", () => {
+    const doc = new User({ phone: "09120000000" });
+    expect(doc.passwordFailedAttempts).toBe(0);
+    doc.passwordHash = "some-bcrypt-hash";
+    const json = doc.toJSON() as Record<string, unknown>;
+    expect(json.passwordHash).toBeUndefined();
+    expect(json.passwordFailedAttempts).toBeUndefined();
+  });
 });

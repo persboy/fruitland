@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { AppError } from "./errors/AppError";
 
 /**
  * Every API route must respond with this envelope shape. Never invent a
@@ -50,4 +51,18 @@ export function apiError(
     },
     { status },
   );
+}
+
+/**
+ * Every route handler's catch block should call this. A known AppError is
+ * translated 1:1; anything else is unexpected and must not leak internals
+ * to the client (MASTER-PROMPT.md §32) — it is logged server-side and
+ * returned as a generic 500.
+ */
+export function apiErrorFromException(err: unknown): NextResponse<ApiEnvelope<null>> {
+  if (err instanceof AppError) {
+    return apiError(err.code, err.message, err.status);
+  }
+  console.error("Unexpected error in API route:", err);
+  return apiError("INTERNAL_SERVER_ERROR", "خطای داخلی سرور رخ داد", 500);
 }

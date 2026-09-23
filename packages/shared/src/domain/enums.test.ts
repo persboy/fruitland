@@ -8,6 +8,7 @@ import {
   ORDER_DELIVERY_STATUSES,
   ORDER_SOURCES,
   ORDER_STATUSES,
+  OTP_PURPOSES,
   PRODUCT_UNITS,
   REVIEW_ATTRIBUTE_TYPES,
   USER_ROLES,
@@ -27,6 +28,7 @@ const allEnums: Record<string, readonly string[]> = {
   VEHICLE_TYPES,
   NOTIFICATION_TYPES,
   REVIEW_ATTRIBUTE_TYPES,
+  OTP_PURPOSES,
 };
 
 describe("domain enums", () => {

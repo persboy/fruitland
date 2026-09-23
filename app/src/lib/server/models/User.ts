@@ -11,6 +11,20 @@ import {
 } from "@fruitland/shared";
 import { baseSchemaOptions } from "./schemaUtils";
 
+const userSchemaOptions = {
+  ...baseSchemaOptions,
+  toJSON: {
+    ...baseSchemaOptions.toJSON,
+    transform: (doc: unknown, ret: Record<string, unknown>) => {
+      const transformed = baseSchemaOptions.toJSON.transform(doc, ret);
+      delete transformed.passwordHash;
+      delete transformed.passwordFailedAttempts;
+      delete transformed.passwordLockedUntil;
+      return transformed;
+    },
+  },
+};
+
 /**
  * A single User collection covers all three roles (customer/courier/admin),
  * per docs/domain-model.md §5.1 — role-specific data lives in an optional
@@ -94,6 +108,15 @@ export interface IUser {
   referredByUserId?: Types.ObjectId;
   addresses: IAddress[];
   courierProfile?: ICourierProfile;
+  /**
+   * Password login is only meaningful for admin/master_admin (customers and
+   * couriers use OTP only) — see docs/auth.md. `select: false` so a normal
+   * `User.findOne(...)` never returns this by accident; auth code must
+   * explicitly `.select("+passwordHash")`.
+   */
+  passwordHash?: string;
+  passwordFailedAttempts: number;
+  passwordLockedUntil?: Date;
 }
 
 const userSchema = new Schema<IUser>(
@@ -110,8 +133,11 @@ const userSchema = new Schema<IUser>(
     referredByUserId: { type: Schema.Types.ObjectId, ref: "User" },
     addresses: { type: [addressSchema], default: [] },
     courierProfile: { type: courierProfileSchema, required: false },
+    passwordHash: { type: String, select: false },
+    passwordFailedAttempts: { type: Number, default: 0, select: false },
+    passwordLockedUntil: { type: Date, select: false },
   },
-  baseSchemaOptions,
+  userSchemaOptions,
 );
 
 export const User = (models.User as Model<IUser> | undefined) || model<IUser>("User", userSchema);

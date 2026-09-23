@@ -78,3 +78,7 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 /** review_attribute value type. Only "rating" is needed today; kept as an enum so a future non-numeric attribute type is additive. */
 export const REVIEW_ATTRIBUTE_TYPES = ["rating"] as const;
 export type ReviewAttributeType = (typeof REVIEW_ATTRIBUTE_TYPES)[number];
+
+/** What an OTP code was requested for — one active code per (phone, purpose) pair. */
+export const OTP_PURPOSES = ["login", "password_reset"] as const;
+export type OtpPurpose = (typeof OTP_PURPOSES)[number];
