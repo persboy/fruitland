@@ -118,3 +118,13 @@ bcrypt (rounds پیش‌فرض ۱۰، env-پذیر)، حداکثر ۵ تلاش �
 - **اجرا نشدند** در این sandbox — همان محدودیت شبکه‌ی ثبت‌شده برای Playwright/مدل‌های Phase 2:
   دانلود باینری MongoDB از `fastdl.mongodb.org` مسدود است. تأیید شد که شکست، شکست دانلود
   باینری است، نه خطای کد. **باید در dev/CI واقعی با `npm run test:integration` اجرا و تأیید شود.**
+
+
+## ۹. Phase 4 — ورود ادمین و راه‌اندازی اولیه (پیاده‌سازی‌شده)
+
+- **SMS واقعی:** `SmsIrProvider` (sms.ir Verify API، `POST /v1/send/verify`، پارامتر `Code`). با `SMS_PROVIDER=smsir` +
+  `SMS_IR_API_KEY` + `SMS_IR_TEMPLATE_ID` فعال می‌شود (املای `sms.ir`/`sms_ir` هم پذیرفته می‌شود). timeout ۱۰ ثانیه؛ کد OTP و کلید هرگز در خطا/لاگ نمی‌آیند.
+- **راه‌اندازی اولیه (تصمیم کاربر: صفحه، نه اسکریپت — Vercel اسکریپت اجازه نمی‌دهد):** `GET /auth/setup-status` → `{setupRequired}`.
+  تا وقتی MASTER_ADMIN ادعا نشده، صفحه‌ی `/admin/login` لینک «راه‌اندازی اولیه» را نشان می‌دهد: OTP (همان `/auth/otp/*`) → اگر کاربر `master_admin` شد،
+  تعیین رمز با `POST /auth/password/setup` (نیاز به نشست admin/master_admin؛ فقط وقتی هنوز رمزی ندارد، وگرنه ۴۰۹ `PASSWORD_ALREADY_SET`). اگر کسی زودتر ادعا کرده باشد، نشست مشتری‌شده بلافاصله بسته می‌شود.
+- **ریسک شناخته‌شده:** تا قبل از اولین ورود OTP، هر کسی که به سایت برسد می‌تواند MASTER_ADMIN شود (ذات قانون «اولین کاربر»). بعد از دیپلوی، فوراً راه‌اندازی را انجام دهید.

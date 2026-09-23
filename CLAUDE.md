@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 3 — Application Foundation (کامل شد) — بعدی: Phase 4 Admin، شروع با صفحه‌ی ورود واقعی
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) پیاده‌سازی شد، منتظر تأیید کاربر. بعدی پس از تأیید: صفحه‌ی ۲ Settings
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -143,11 +143,21 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 
 
+## Phase 4 — Admin
+
+### صفحه‌ی ۱: Authentication (پیاده‌سازی شد؛ منتظر تأیید کاربر)
+
+- **صفحات:** `/admin/login` (ورود با موبایل+رمز، فراموشی رمز با OTP، راه‌اندازی اولیه‌ی سیستم)، `/admin` (خانه‌ی ساده: نام/نقش + خروج، بدون داده‌ی جعلی). همه‌ی صفحات زیر `app/src/app/admin/(panel)/` خودکار پشت `AdminShell` (گیت سمت کلاینت با `/auth/me`؛ مرجع اصلی همچنان API است) قرار می‌گیرند. کاربر بدون نام، «کاربر» نمایش داده می‌شود (§۱۷).
+- **بک‌اند جدید:** `GET /auth/setup-status`، `POST /auth/password/setup`، `SmsIrProvider` (جزئیات و ریسک در `docs/auth.md` §۹).
+- **تصمیم کاربر:** اولین مستر ادمین از طریق صفحه‌ی راه‌اندازی اولیه ساخته می‌شود (نه اسکریپت).
+- **تست:** `npm run verify` پاس (lint، typecheck، ۸۶ تست واحد در app (۷۳ قبلی + ۱۳ جدید: ۸ کامپوننت جریان ورود، ۳ SmsIrProvider، ۲ env)، ۳ تست SmsIrProvider، ۲ تست env، build). اجرای واقعی `next start`: `/admin/login` با `lang="fa" dir="rtl"` رندر شد و `POST /auth/password/setup` بدون نشست ۴۰۱ داد.
+- **اجرا نشده (محدودیت sandbox):** تست‌های یکپارچه‌ی جدید (`isInitialSetupRequired`، `setInitialPassword`)، ارسال واقعی پیامک sms.ir با کلید واقعی، E2E، بررسی بصری ۳۷۵/۷۶۸/۱۲۸۰px، axe.
+
 ## کارهای تأییدنشده / محدودیت شناخته‌شده
 
 - **Playwright e2e اجرا نشد.** دانلود باینری مرورگر Chromium از `cdn.playwright.dev` در sandbox فعلی مسدود است (خارج از allowlist شبکه). فایل `e2e/smoke.spec.ts` نوشته شده ولی تا اجرای واقعی در محیط dev/CI با دسترسی شبکه کامل، «تست‌شده» تلقی نشود.
 - **تست‌های یکپارچه‌ی مدل (`npm run test:integration`) اجرا نشدند.** همان محدودیت شبکه — دانلود باینری MongoDB از `fastdl.mongodb.org` مسدود است. فایل `persistence.integration.test.ts` (Phase 2) و `otpService.integration.test.ts`/`authService.integration.test.ts` (Phase 3) نوشته شده‌اند؛ باید در dev/CI واقعی اجرا و تأیید شوند.
-- **سرویس SMS واقعی هنوز انتخاب نشده.** فقط `ConsoleSmsProvider` (dev-only) وجود دارد. جزئیات و راه اضافه‌کردن provider واقعی در `docs/auth.md` §۸.
+- **SMS:** provider واقعی sms.ir پیاده شد (Phase 4) ولی ارسال واقعی با کلید واقعی هنوز تست نشده؛ `ConsoleSmsProvider` فقط dev.
 - **بررسی بصری واقعی (screenshot) طراحی UI انجام نشد.** این sandbox ابزار رندر/مرورگر تصویری ندارد. صفحات جدید (storefront/admin/courier shell) فقط با build/typecheck تأیید شدند، نه با چشم — باید طبق پروتکل صفحه (§۲۴ Master Prompt) در ۳۷۵px/۷۶۸px/۱۲۸۰px در محیط واقعی بررسی شوند.
 - axe accessibility testing هنوز راه‌اندازی نشده.
 - MongoDB واقعی برای dev/test در sandbox فعلی نصب نیست؛ اتصال فقط با کانفیگ صحیح تست شد، نه با DB واقعی در حال اجرا.
@@ -170,4 +180,4 @@ Spec → Backend (آماده) → Frontend → Verification → Docs → Git →
 
 - در محیط dev/CI با دسترسی شبکه‌ی کامل: `npm run test:integration` و `npm run test:e2e` را اجرا و نتیجه را در این فایل ثبت کنید.
 - بررسی بصری واقعی (۳۷۵/۷۶۸/۱۲۸۰px) صفحات ساخته‌شده در این فاز، در محیط dev واقعی.
-- انتخاب سرویس واقعی SMS قبل از استقرار production لازم است (`docs/auth.md` §۸).
+- قبل از استقرار: `SMS_PROVIDER=smsir` + کلید/Template در Vercel و ساخت Template با متغیر `#Code#` در پنل sms.ir.

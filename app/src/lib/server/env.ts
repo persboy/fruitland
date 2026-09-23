@@ -34,7 +34,19 @@ const envSchema = z.object({
    * code instead of sending it; getEnv() below refuses to start with it in
    * production so an OTP code can never end up in a production log.
    */
-  SMS_PROVIDER: z.enum(["console"]).default("console"),
+  SMS_PROVIDER: z.preprocess(
+    // Vercel value may be written "smsir", "sms.ir" or "sms_ir" — all mean the same provider.
+    (v) => (typeof v === "string" ? v.trim().toLowerCase().replace(/[^a-z]/g, "") : v),
+    z.enum(["console", "smsir"]).default("console"),
+  ),
+  /** sms.ir Verify (template) API — required only when SMS_PROVIDER=smsir. */
+  SMS_IR_API_KEY: z.string().min(1).optional(),
+  SMS_IR_TEMPLATE_ID: z.coerce.number().int().positive().optional(),
+}).superRefine((env, ctx) => {
+  if (env.SMS_PROVIDER === "smsir") {
+    if (!env.SMS_IR_API_KEY) ctx.addIssue({ code: "custom", path: ["SMS_IR_API_KEY"], message: "required when SMS_PROVIDER=smsir" });
+    if (!env.SMS_IR_TEMPLATE_ID) ctx.addIssue({ code: "custom", path: ["SMS_IR_TEMPLATE_ID"], message: "required when SMS_PROVIDER=smsir" });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

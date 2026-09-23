@@ -148,4 +148,27 @@ describe("authService (integration)", () => {
       code: "OTP_NOT_REQUESTED",
     });
   });
+
+  it("isInitialSetupRequired is true until MASTER_ADMIN is claimed, then false", async () => {
+    const { isInitialSetupRequired, requestLoginOtp, verifyLoginOtpAndIssueTokens } = await import("../services/authService");
+    expect(await isInitialSetupRequired()).toBe(true);
+    const code = await captureOtpCode(() => requestLoginOtp("09120000020"));
+    await verifyLoginOtpAndIssueTokens("09120000020", code, {});
+    expect(await isInitialSetupRequired()).toBe(false);
+  });
+
+  it("setInitialPassword works once for a passwordless master admin, then refuses; customers are refused", async () => {
+    const { requestLoginOtp, verifyLoginOtpAndIssueTokens, setInitialPassword, loginAdminWithPassword } = await import("../services/authService");
+    const c1 = await captureOtpCode(() => requestLoginOtp("09120000021"));
+    const { user: master } = await verifyLoginOtpAndIssueTokens("09120000021", c1, {});
+    const c2 = await captureOtpCode(() => requestLoginOtp("09120000022"));
+    const { user: customer } = await verifyLoginOtpAndIssueTokens("09120000022", c2, {});
+
+    await setInitialPassword(master._id.toString(), "correct-horse-battery");
+    await expect(setInitialPassword(master._id.toString(), "another-password-1")).rejects.toMatchObject({ code: "PASSWORD_ALREADY_SET" });
+    await expect(setInitialPassword(customer._id.toString(), "correct-horse-battery")).rejects.toMatchObject({ code: "FORBIDDEN_ROLE" });
+
+    const { user } = await loginAdminWithPassword("09120000021", "correct-horse-battery", {});
+    expect(user.role).toBe("master_admin");
+  });
 });

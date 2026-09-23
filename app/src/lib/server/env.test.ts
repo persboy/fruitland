@@ -34,4 +34,29 @@ describe("getEnv", () => {
     const { getEnv } = await import("./env");
     expect(() => getEnv()).toThrow(/SMS_PROVIDER=console/);
   });
+
+  const baseEnv = () => {
+    vi.stubEnv("MONGODB_URI", "mongodb://localhost:27017/fruitland_test");
+    vi.stubEnv("JWT_ACCESS_SECRET", "test-access-secret");
+    vi.stubEnv("JWT_REFRESH_SECRET", "test-refresh-secret");
+  };
+
+  it("accepts sms.ir spelled 'sms.ir' and requires its API key and template id", async () => {
+    baseEnv();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SMS_PROVIDER", "sms.ir");
+    vi.stubEnv("SMS_IR_API_KEY", "key");
+    vi.stubEnv("SMS_IR_TEMPLATE_ID", "123456");
+    const { getEnv } = await import("./env");
+    const env = getEnv();
+    expect(env.SMS_PROVIDER).toBe("smsir");
+    expect(env.SMS_IR_TEMPLATE_ID).toBe(123456);
+  });
+
+  it("rejects SMS_PROVIDER=smsir without an API key / template id", async () => {
+    baseEnv();
+    vi.stubEnv("SMS_PROVIDER", "smsir");
+    const { getEnv } = await import("./env");
+    expect(() => getEnv()).toThrow(/SMS_IR_API_KEY/);
+  });
 });
