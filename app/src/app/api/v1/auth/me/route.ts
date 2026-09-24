@@ -10,11 +10,12 @@ export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();
     const { userId } = requireAuth(request);
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select("+passwordHash");
     if (!user) {
       throw AppError.notFound("کاربر یافت نشد", "USER_NOT_FOUND");
     }
-    return apiSuccess(user.toJSON());
+    // hasPassword lets the UI know whether changing the password needs the current one; the hash itself never leaves (see User.ts toJSON).
+    return apiSuccess({ ...user.toJSON(), hasPassword: Boolean(user.passwordHash) });
   } catch (err) {
     return apiErrorFromException(err);
   }

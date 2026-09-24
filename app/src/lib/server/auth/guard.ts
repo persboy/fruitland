@@ -37,3 +37,10 @@ export function requireRole(context: AuthContext, roles: UserRole[]): void {
     throw AppError.forbidden("شما اجازه‌ی دسترسی به این بخش را ندارید", "FORBIDDEN_ROLE");
   }
 }
+
+/** Shortcut for every /admin/* route: authenticated AND role admin/master_admin. No granular permissions are approved yet — role alone gates the admin area. */
+export function requireAdmin(request: NextRequest): AuthContext {
+  const context = requireAuth(request);
+  requireRole(context, ["admin", "master_admin"]);
+  return context;
+}

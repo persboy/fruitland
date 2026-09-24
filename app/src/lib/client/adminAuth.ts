@@ -1,9 +1,17 @@
 import { ApiClientError, apiFetch } from "./apiClient";
 
 export interface SessionUser {
-  displayName?: string;
+  firstName?: string;
+  lastName?: string;
   phone: string;
   role: string;
+  /** Whether a password is already set (changing it then requires the current one). */
+  hasPassword?: boolean;
+}
+
+/** Full name, or the generic "ادمین" until a name is registered (MASTER-PROMPT §17: never invent a name). */
+export function displayNameOf(user: Pick<SessionUser, "firstName" | "lastName">): string {
+  return [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || "ادمین";
 }
 
 export const ADMIN_ROLES = ["admin", "master_admin"] as const;

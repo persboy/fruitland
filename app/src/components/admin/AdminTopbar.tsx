@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, LogOut, Menu } from "lucide-react";
-import type { SessionUser } from "@/lib/client/adminAuth";
+import { displayNameOf, type SessionUser } from "@/lib/client/adminAuth";
 
 export function AdminTopbar(props: {
   onMenuClick: () => void;
@@ -26,7 +26,7 @@ export function AdminTopbar(props: {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
-  const displayName = user.displayName || "ادمین";
+  const displayName = displayNameOf(user);
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-gray-100 bg-white/80 px-4 backdrop-blur sm:px-6">

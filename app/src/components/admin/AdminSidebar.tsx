@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Leaf, X, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Leaf, Settings, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { ROLE_LABELS, type SessionUser } from "@/lib/client/adminAuth";
+import { ROLE_LABELS, displayNameOf, type SessionUser } from "@/lib/client/adminAuth";
 
 interface NavItem {
   href: string;
@@ -14,11 +14,14 @@ interface NavItem {
 
 // Only pages that actually exist are listed (no dead links, MASTER-PROMPT §38).
 // Each Phase 4 page adds its own entry here when it is built.
-const navItems: NavItem[] = [{ href: "/admin", label: "میز کار", icon: LayoutDashboard }];
+const navItems: NavItem[] = [
+  { href: "/admin", label: "میز کار", icon: LayoutDashboard },
+  { href: "/admin/settings", label: "تنظیمات", icon: Settings },
+];
 
 export function AdminSidebar({ open, onClose, user }: { open: boolean; onClose: () => void; user: SessionUser }) {
   const pathname = usePathname();
-  const adminName = user.displayName || "ادمین";
+  const adminName = displayNameOf(user);
   const adminRole = ROLE_LABELS[user.role] ?? "ادمین";
 
   return (

@@ -6,6 +6,7 @@ import { Loader2, WifiOff } from "lucide-react";
 import { ApiClientError } from "@/lib/client/apiClient";
 import { fetchCurrentUser, isAdminRole, logoutCurrentSession, type SessionUser } from "@/lib/client/adminAuth";
 import { Button, StateMessage } from "@/components/ui";
+import { AdminUserContext } from "./AdminUserContext";
 import { AdminSidebar } from "./AdminSidebar";
 import { AdminTopbar } from "./AdminTopbar";
 
@@ -13,6 +14,7 @@ type GateState = { status: "loading" } | { status: "network-error" } | { status:
 
 const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/admin": { title: "میز کار ادمین", subtitle: "خلاصه عملکرد امروز غرفه" },
+  "/admin/settings": { title: "تنظیمات", subtitle: "مدیریت حساب، فروشگاه و ارسال" },
 };
 
 /**
@@ -95,7 +97,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
   }
 
   const meta = pageMeta[pathname] ?? { title: "پنل مدیریت", subtitle: "" };
+  const updateUser = (patch: Partial<SessionUser>) =>
+    setState((prev) => (prev.status === "ok" ? { status: "ok", user: { ...prev.user, ...patch } } : prev));
   return (
+    <AdminUserContext.Provider value={{ user: state.user, updateUser }}>
     <div className="flex min-h-screen bg-[#F7F9F8]">
       <AdminSidebar open={drawerOpen} onClose={() => setDrawerOpen(false)} user={state.user} />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -109,5 +114,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
         <main className="flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">{children}</main>
       </div>
     </div>
+    </AdminUserContext.Provider>
   );
 }

@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) پیاده‌سازی شد، منتظر تأیید کاربر. بعدی پس از تأیید: صفحه‌ی ۲ Settings
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. بعدی پس از تأیید: صفحه‌ی ۳ Categories
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -145,7 +145,7 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 ## Phase 4 — Admin
 
-### صفحه‌ی ۱: Authentication (پیاده‌سازی شد؛ منتظر تأیید کاربر)
+### صفحه‌ی ۱: Authentication (تأیید‌شده توسط کاربر)
 
 - **ظاهر:** کپی وفادار `AdminLoginClient`/`AdminShell`/`AdminSidebar`/`AdminTopbar` پروژه‌ی Legacy (کارت مرکزی، دو تب «رمز عبور» / «کد پیامکی»، ورودی‌های pill با آیکون، دکمه‌ی emerald، سایدبار راست با برند و کارت ادمین، تاپ‌بار شیشه‌ای).
   **عمداً حذف‌شده نسبت به Legacy (چون هنوز پشتشان قابلیت واقعی نیست، §۳۸/§۲۲):** نوار جستجو، زنگ اعلان، لینک «تنظیمات» و آیتم‌های منو به صفحات ناساخته. هر صفحه‌ی Phase 4 آیتم منوی خودش را هنگام ساخته‌شدن اضافه می‌کند.
@@ -154,6 +154,22 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **بک‌اند جدید:** `SmsIrProvider` (جزئیات در `docs/auth.md` §۹). endpoint های `setup-status`/`password/setup` که در نسخه‌ی اولیه نوشته شده بودند حذف شدند (با ظاهر Legacy لازم نیستند).
 - **تست:** `npm run verify` پاس؛ ۹۰ تست واحد در app (شامل ۱۰ تست جریان ورود، ۳ SmsIrProvider، ۲ env، ۲ گروه helper).
 - **اجرا نشده (محدودیت sandbox):** بررسی بصری/اسکرین‌شات ۳۷۵/۷۶۸/۱۲۸۰px (مرورگر در دسترس نیست — ظاهر با Legacy مقایسه‌ی کدی شده، نه بصری)، axe (کنتراست `text-gray-400` روی سفید Legacy احتمالاً زیر ۴.۵:۱ است؛ رنگ عیناً حفظ شد)، E2E، تست‌های یکپارچه‌ی DB، ارسال واقعی sms.ir.
+
+### صفحه‌ی ۲: Settings (پیاده‌سازی شد؛ منتظر تأیید کاربر)
+
+- **مسیر:** `/admin/settings` (منوی کناری «تنظیمات»؛ زیر `(panel)` پس گارد ورود دارد). چهار کارت با ظاهر Legacy (حالت نمایش/ویرایش): **پروفایل من**، **اطلاعات فروشگاه**، **تنظیمات ارسال**، **روش‌های پرداخت** (فقط COD، فقط‌نمایشی).
+- **تصمیم‌های کاربر:** (۱) تغییر شماره‌ی موبایل ادمین **با OTP روی شماره‌ی جدید** (برخلاف Legacy که بدون OTP بود). (۲) کارت «اعضای تیم و دسترسی‌ها» در Settings **نیست** — بعداً صفحه‌ی جدا.
+- **خارج از این صفحه (عمداً):** کیف پول، رفرال (فرمول تصمیم‌گیری نشده)، اعلان‌ها، `socialLinks` (متعلق به صفحه‌ی «محتوای سایت»). توضیح/ایمیل فروشگاه و «آدرس ساخت‌یافته» Legacy هم نیست چون در مدل دامنه‌ی جدید (`StoreSettings`) وجود ندارد.
+- **API (همه فقط admin/master_admin؛ ترتیب: auth → validation → DB):**
+  `PATCH /admin/profile` (نام)، `POST /admin/profile/phone/request` + `/phone/confirm`، `POST /admin/profile/password`
+  (رمز فعلی فقط وقتی رمزی وجود دارد لازم است؛ حدس اشتباه به همان شمارنده‌ی قفل ورود می‌رود)،
+  `GET/PUT /admin/settings/store`، `GET/PUT /admin/settings/shipping`. `GET /auth/me` فیلد `hasPassword` هم برمی‌گرداند.
+- **یک منبع حقیقت ارسال:** `ShippingSettings` (singleton) — `expressDeliveryFee` و `freeDeliveryThreshold`، فقط عدد صحیح تومان (Zod + validator مدل). **هیچ مقدار پیش‌فرضی seed نمی‌شود** (مقادیر ۲۵٬۰۰۰/۵۰۰٬۰۰۰ Legacy تصمیم کسب‌وکار تأییدشده نیست)؛ تا اولین ذخیره `isConfigured:false` و UI حالت «هنوز تعیین نشده» نشان می‌دهد. ⚠️ سبد/checkout آینده باید حالت تنظیم‌نشده را مدیریت کنند.
+- **AuditLog:** تغییر شماره (قبل/بعد)، تغییر رمز (بدون مقدار)، ذخیره‌ی تنظیمات فروشگاه/ارسال (قبل/بعد).
+- **تغییرات پشتیبان:** `OtpPurpose` جدید `phone_change` (packages/shared)، `requireAdmin` در `guard.ts`، `lib: DOM` در `app/tsconfig.json`.
+- **تست:** `npm run verify` پاس؛ ۱۱۲ تست (۹ تست Zod، ۱۰ تست کامپوننت کارت‌ها، helper پول/رقم فارسی). smoke روی سرور production با توکن امضاشده: نقش customer → ۴۰۳، مبلغ اعشاری/منفی/رشته‌ای/نام خالی/رمز کوتاه → ۴۰۰ قبل از هر اتصال DB.
+- **اجرا نشده (محدودیت sandbox):** تست یکپارچه‌ی `profileSettings.integration.test.ts` (نوشته شده، نیاز به MongoDB)، مسیر موفق واقعی API با DB، بررسی بصری ۳۷۵/۷۶۸/۱۲۸۰، axe، E2E، ارسال واقعی sms.ir.
+- **نکته‌ی عملیاتی:** `getEnv()` در production با `SMS_PROVIDER=console` می‌ترکد و چون `requireAuth` همه‌ی خطاها را «نشست نامعتبر» گزارش می‌کند، اشتباه در env ورسل به‌شکل ۴۰۱ همه‌جا دیده می‌شود.
 
 ## کارهای تأییدنشده / محدودیت شناخته‌شده
 

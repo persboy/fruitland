@@ -4,8 +4,8 @@ import { Spinner } from "./Spinner";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "danger" | "ghost";
-  /** md = the pill call-to-action (forms, login); sm = compact rounded-xl button (toolbars, dialogs). */
-  size?: "sm" | "md";
+  /** md = the pill call-to-action (forms, login); sm = compact rounded-xl button; xs = the smaller in-card button (settings forms). */
+  size?: "xs" | "sm" | "md";
   isLoading?: boolean;
 }
 
@@ -19,6 +19,7 @@ const variantClasses: Record<NonNullable<ButtonProps["variant"]>, string> = {
 const sizeClasses: Record<NonNullable<ButtonProps["size"]>, string> = {
   md: "rounded-full px-5 py-3.5 text-sm font-extrabold",
   sm: "rounded-xl px-4 py-2.5 text-sm font-bold",
+  xs: "rounded-xl px-4 py-2 text-xs font-bold",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
