@@ -1,11 +1,12 @@
-import { AdminLoginFlow } from "./AdminLoginFlow";
+import { Suspense } from "react";
+import { AdminLoginClient } from "./AdminLoginClient";
 
-export const metadata = { title: "ورود مدیران — پرزبوی" };
+export const metadata = { title: "ورود به پنل مدیریت | پرزبوی" };
 
 export default function AdminLoginPage() {
   return (
-    <div className="mx-auto w-full max-w-sm pt-8">
-      <AdminLoginFlow />
-    </div>
+    <Suspense>
+      <AdminLoginClient />
+    </Suspense>
   );
 }

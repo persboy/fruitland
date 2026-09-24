@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("rounded-md border border-line bg-paper-raised p-4", className)}
+      className={cn("rounded-2xl border border-gray-100 bg-white p-5 shadow-sm shadow-gray-100/60", className)}
       {...props}
     />
   );

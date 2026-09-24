@@ -25,7 +25,3 @@ export const passwordResetConfirmSchema = z.object({
   code: z.string().min(1, "کد الزامی است"),
   newPassword: z.string().min(8, "رمز عبور باید حداقل ۸ نویسه باشد"),
 });
-
-export const initialPasswordSchema = z.object({
-  newPassword: z.string().min(8, "رمز عبور باید حداقل ۸ نویسه باشد"),
-});

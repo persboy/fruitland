@@ -7,21 +7,32 @@ export interface StateMessageProps {
   title: string;
   description?: string;
   action?: ReactNode;
+  /** "error" uses the legacy red tile; "neutral" the emerald one. */
+  tone?: "neutral" | "error";
   className?: string;
 }
 
 /**
- * Per the frontend-design skill's writing guidance: title states what
- * happened, description says what to do about it — never vague, never
- * apologetic on the system's behalf.
+ * Same look as the legacy ErrorState: tinted rounded-2xl icon tile, bold
+ * title, muted description. Title states what happened, description says
+ * what to do about it.
  */
-export function StateMessage({ icon: Icon, title, description, action, className }: StateMessageProps) {
+export function StateMessage({ icon: Icon, title, description, action, tone = "neutral", className }: StateMessageProps) {
   return (
-    <div className={cn("flex flex-col items-center gap-3 px-6 py-12 text-center", className)}>
-      <Icon className="size-10 text-muted" aria-hidden="true" />
-      <p className="text-lg font-medium text-ink">{title}</p>
-      {description && <p className="max-w-sm text-sm text-muted">{description}</p>}
-      {action}
+    <div className={cn("flex flex-col items-center justify-center gap-4 p-8 text-center", className)}>
+      <span
+        className={cn(
+          "flex h-14 w-14 items-center justify-center rounded-2xl",
+          tone === "error" ? "bg-red-50 text-red-500" : "bg-emerald-50 text-emerald-600",
+        )}
+      >
+        <Icon className="h-7 w-7" strokeWidth={2} aria-hidden="true" />
+      </span>
+      <div className="space-y-1">
+        <h2 className="text-base font-extrabold text-gray-900">{title}</h2>
+        {description && <p className="max-w-sm text-sm text-gray-400">{description}</p>}
+      </div>
+      {action && <div className="mt-2 flex flex-wrap items-center justify-center gap-2.5">{action}</div>}
     </div>
   );
 }

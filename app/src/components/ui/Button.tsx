@@ -4,21 +4,21 @@ import { Spinner } from "./Spinner";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "danger" | "ghost";
+  /** md = the pill call-to-action (forms, login); sm = compact rounded-xl button (toolbars, dialogs). */
   size?: "sm" | "md";
   isLoading?: boolean;
 }
 
 const variantClasses: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  primary: "bg-brand-500 text-white hover:bg-brand-600 disabled:bg-brand-400/60",
-  secondary:
-    "bg-transparent text-brand-600 border border-brand-500 hover:bg-brand-500/10 disabled:opacity-50",
-  danger: "bg-danger-500 text-white hover:bg-danger-600 disabled:bg-danger-500/60",
-  ghost: "bg-transparent text-ink hover:bg-ink/5 disabled:opacity-50",
+  primary: "bg-emerald-500 text-white hover:bg-emerald-600",
+  secondary: "border border-gray-200 text-gray-600 hover:bg-gray-50",
+  danger: "bg-red-500 text-white hover:bg-red-600",
+  ghost: "text-gray-600 hover:bg-gray-50",
 };
 
 const sizeClasses: Record<NonNullable<ButtonProps["size"]>, string> = {
-  sm: "h-9 px-3 text-sm",
-  md: "h-11 px-4 text-base",
+  md: "rounded-full px-5 py-3.5 text-sm font-extrabold",
+  sm: "rounded-xl px-4 py-2.5 text-sm font-bold",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -30,7 +30,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       disabled={disabled || isLoading}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed",
+        "inline-flex cursor-pointer items-center justify-center gap-1.5 transition disabled:cursor-not-allowed disabled:opacity-60",
         variantClasses[variant],
         sizeClasses[size],
         className,

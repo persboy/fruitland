@@ -6,7 +6,7 @@ import { AppError } from "../errors/AppError";
 import { normalizeIranMobile } from "@fruitland/shared";
 import { User, type IUser } from "../models/User";
 import { RefreshToken } from "../models/RefreshToken";
-import { SystemState, tryClaimMasterAdmin } from "../models/SystemState";
+import { tryClaimMasterAdmin } from "../models/SystemState";
 import { requestOtp, verifyOtp } from "./otpService";
 import { comparePassword, hashPassword } from "../auth/password";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../auth/jwt";
@@ -305,31 +305,4 @@ export async function revokeAllSessions(userId: string, exceptJti?: string): Pro
     { userId, revokedAt: null, ...(exceptJti ? { jti: { $ne: exceptJti } } : {}) },
     { $set: { revokedAt: new Date() } },
   );
-}
-
-/**
- * True until someone has claimed MASTER_ADMIN. Drives the one-time "initial
- * setup" screen at /admin/login; it discloses nothing but this single boolean.
- */
-export async function isInitialSetupRequired(): Promise<boolean> {
-  return !(await SystemState.exists({}));
-}
-
-/**
- * Lets an already-authenticated admin/master_admin who has NO password yet
- * (i.e. the freshly claimed MASTER_ADMIN, who signed in via OTP) set one.
- * Refuses if a password already exists — changing an existing password goes
- * through the OTP reset flow, which also revokes other sessions.
- */
-export async function setInitialPassword(userId: string, newPassword: string): Promise<void> {
-  const user = await User.findById(userId).select("+passwordHash");
-  if (!user) throw AppError.notFound("کاربر یافت نشد", "USER_NOT_FOUND");
-  if (!ADMIN_ROLES_FOR_PASSWORD_LOGIN.includes(user.role as "admin" | "master_admin")) {
-    throw AppError.forbidden("شما اجازه‌ی این کار را ندارید", "FORBIDDEN_ROLE");
-  }
-  if (user.passwordHash) {
-    throw AppError.conflict("برای این حساب قبلاً رمز عبور تنظیم شده است", "PASSWORD_ALREADY_SET");
-  }
-  user.passwordHash = await hashPassword(newPassword);
-  await user.save();
 }

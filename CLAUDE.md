@@ -15,11 +15,11 @@
 ```
 /
 ├── app/                          @fruitland/app — اپ Next.js 16 (App Router)
-│   ├── public/fonts/              Vazirmatn[wght].woff2 + VAZIRMATN-OFL.txt (self-hosted، لایسنس OFL)
+│   ├── src/app/fonts/iranyekanx/  IRANYekanX (۵ وزن woff2 + FontLicense.txt) — همان فونت پروژه‌ی Legacy، از طریق next/font/local
 │   ├── src/app/
 │   │   ├── layout.tsx (فقط html/body/fonts)، not-found.tsx، global-error.tsx
 │   │   ├── (storefront)/          layout.tsx (شل موبایل)، page.tsx، loading.tsx، error.tsx
-│   │   ├── admin/                 layout.tsx (شل دسکتاپ)، loading.tsx، error.tsx — هنوز page.tsx ندارد (Phase 4)
+│   │   ├── admin/                 error.tsx، login/ (صفحه‌ی ورود)، (panel)/ (layout=AdminShell، page.tsx=میز کار)
 │   │   ├── courier/               layout.tsx (شل موبایل)، loading.tsx، error.tsx — هنوز page.tsx ندارد (Phase 5)
 │   │   └── api/v1/health, api/v1/auth/*        ۱۱ روت auth
 │   ├── src/components/ui/         Button, Input, Card, Spinner, Skeleton, StateMessage (§۲۱ همه‌ی state ها)
@@ -102,12 +102,12 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 ### بخش ۲: Routing، UI System، API Client
 
-- **طرح بصری («گرمای جعبه‌ی میوه»):** پس‌زمینه‌ی کرمِ گرم `#F7F0E1`، سبز برگی تیره
-  `brand-500 #3F6E3C` به‌عنوان رنگ اصلی/قابل‌اعتماد، نارنجی نارنگی `accent-500 #DB8B2C` فقط
-  برای CTA/برجسته‌سازی — عمداً نه ترکیب کرم+ترکوتای رایج AI (`#D97757`) و نه کارت‌های
-  یکسان‌شکل با سایه‌ی خاکستری تکراری. توکن‌ها در `app/src/app/globals.css` با Tailwind v4
-  `@theme` تعریف شده‌اند. فونت فارسی **Vazirmatn** (self-hosted، وریبل، از `public/fonts/`)
-  جایگزین fallback موقت فاز ۱ شد.
+- **طرح بصری (طبق دستور کاربر: عیناً از پروژه‌ی Legacy):** پالت پیش‌فرض Tailwind — emerald (`emerald-500/600`)
+  رنگ اصلی، gray برای خنثی‌ها، red برای خطا/حذف؛ پس‌زمینه‌ی `#F7F9F8`؛ کارت‌ها `rounded-2xl border-gray-100
+  shadow-sm`؛ ورودی/دکمه‌ی اصلی به‌شکل pill؛ فونت **IRANYekanX** (`--font-iranyekanx`، `font-sans`). هیچ توکن
+  رنگ سفارشی وجود ندارد (طرح «کرم/سبز برگی/نارنجی» و Vazirmatn قبلی حذف شد). فقط فواصل غیراستاندارد Legacy به
+  مقادیر استاندارد Tailwind تبدیل می‌شوند. ⚠️ فونت مالکیتی است: کد لایسنس ۶ رقمی باید در
+  `app/src/app/fonts/iranyekanx/FontLicense.txt` درج شود (ریپو private است).
 - **Routing:** استفاده از Route Group `(storefront)` (بدون تأثیر در URL، فقط سازمان‌دهی)
   + پوشه‌های واقعی `admin/` و `courier/` (چون این‌ها به پیشوند URL واقعی نیاز دارند). هر سه
   layout جدای خودشان را دارند (استوِرفرانت/پیک: موبایل و max-width محدود؛ ادمین: تمام‌عرض
@@ -147,11 +147,13 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 ### صفحه‌ی ۱: Authentication (پیاده‌سازی شد؛ منتظر تأیید کاربر)
 
-- **صفحات:** `/admin/login` (ورود با موبایل+رمز، فراموشی رمز با OTP، راه‌اندازی اولیه‌ی سیستم)، `/admin` (خانه‌ی ساده: نام/نقش + خروج، بدون داده‌ی جعلی). همه‌ی صفحات زیر `app/src/app/admin/(panel)/` خودکار پشت `AdminShell` (گیت سمت کلاینت با `/auth/me`؛ مرجع اصلی همچنان API است) قرار می‌گیرند. کاربر بدون نام، «کاربر» نمایش داده می‌شود (§۱۷).
-- **بک‌اند جدید:** `GET /auth/setup-status`، `POST /auth/password/setup`، `SmsIrProvider` (جزئیات و ریسک در `docs/auth.md` §۹).
-- **تصمیم کاربر:** اولین مستر ادمین از طریق صفحه‌ی راه‌اندازی اولیه ساخته می‌شود (نه اسکریپت).
-- **تست:** `npm run verify` پاس (lint، typecheck، ۸۶ تست واحد در app (۷۳ قبلی + ۱۳ جدید: ۸ کامپوننت جریان ورود، ۳ SmsIrProvider، ۲ env)، ۳ تست SmsIrProvider، ۲ تست env، build). اجرای واقعی `next start`: `/admin/login` با `lang="fa" dir="rtl"` رندر شد و `POST /auth/password/setup` بدون نشست ۴۰۱ داد.
-- **اجرا نشده (محدودیت sandbox):** تست‌های یکپارچه‌ی جدید (`isInitialSetupRequired`، `setInitialPassword`)، ارسال واقعی پیامک sms.ir با کلید واقعی، E2E، بررسی بصری ۳۷۵/۷۶۸/۱۲۸۰px، axe.
+- **ظاهر:** کپی وفادار `AdminLoginClient`/`AdminShell`/`AdminSidebar`/`AdminTopbar` پروژه‌ی Legacy (کارت مرکزی، دو تب «رمز عبور» / «کد پیامکی»، ورودی‌های pill با آیکون، دکمه‌ی emerald، سایدبار راست با برند و کارت ادمین، تاپ‌بار شیشه‌ای).
+  **عمداً حذف‌شده نسبت به Legacy (چون هنوز پشتشان قابلیت واقعی نیست، §۳۸/§۲۲):** نوار جستجو، زنگ اعلان، لینک «تنظیمات» و آیتم‌های منو به صفحات ناساخته. هر صفحه‌ی Phase 4 آیتم منوی خودش را هنگام ساخته‌شدن اضافه می‌کند.
+- **مسیرها:** `/admin/login` (پشتیبانی از `?returnTo=` فقط برای مسیرهای `/admin`)، `/admin` (میز کار؛ فعلاً فقط پیام ورود موفق، بدون آمار جعلی). صفحات زیر `admin/(panel)/` خودکار پشت `AdminShell` (گیت سمت کلاینت با `/auth/me`؛ مرجع اصلی همچنان API) هستند.
+- **جریان‌ها:** ورود با رمز؛ ورود با کد پیامکی (همان `/auth/otp/*`). **اولین مستر ادمین** با تب «کد پیامکی» ساخته می‌شود (اولین OTP سیستم اتمیک MASTER_ADMIN می‌شود) و بعداً از «تنظیمات» (صفحه‌ی ۲) رمز می‌گذارد — مثل Legacy. شماره‌ای که ادمین نیست بعد از OTP بلافاصله logout و با پیام «این شماره دسترسی مدیریتی ندارد» رد می‌شود.
+- **بک‌اند جدید:** `SmsIrProvider` (جزئیات در `docs/auth.md` §۹). endpoint های `setup-status`/`password/setup` که در نسخه‌ی اولیه نوشته شده بودند حذف شدند (با ظاهر Legacy لازم نیستند).
+- **تست:** `npm run verify` پاس؛ ۹۰ تست واحد در app (شامل ۱۰ تست جریان ورود، ۳ SmsIrProvider، ۲ env، ۲ گروه helper).
+- **اجرا نشده (محدودیت sandbox):** بررسی بصری/اسکرین‌شات ۳۷۵/۷۶۸/۱۲۸۰px (مرورگر در دسترس نیست — ظاهر با Legacy مقایسه‌ی کدی شده، نه بصری)، axe (کنتراست `text-gray-400` روی سفید Legacy احتمالاً زیر ۴.۵:۱ است؛ رنگ عیناً حفظ شد)، E2E، تست‌های یکپارچه‌ی DB، ارسال واقعی sms.ir.
 
 ## کارهای تأییدنشده / محدودیت شناخته‌شده
 

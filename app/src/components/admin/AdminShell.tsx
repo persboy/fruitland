@@ -1,39 +1,41 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
-import { LogOut, WifiOff } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Loader2, WifiOff } from "lucide-react";
 import { ApiClientError } from "@/lib/client/apiClient";
-import {
-  ROLE_LABELS,
-  fetchCurrentUser,
-  isAdminRole,
-  logoutCurrentSession,
-  type SessionUser,
-} from "@/lib/client/adminAuth";
-import { Button, Skeleton, StateMessage } from "@/components/ui";
+import { fetchCurrentUser, isAdminRole, logoutCurrentSession, type SessionUser } from "@/lib/client/adminAuth";
+import { Button, StateMessage } from "@/components/ui";
+import { AdminSidebar } from "./AdminSidebar";
+import { AdminTopbar } from "./AdminTopbar";
 
 type GateState = { status: "loading" } | { status: "network-error" } | { status: "ok"; user: SessionUser };
 
+const pageMeta: Record<string, { title: string; subtitle: string }> = {
+  "/admin": { title: "میز کار ادمین", subtitle: "خلاصه عملکرد امروز غرفه" },
+};
+
 /**
- * Client-side gate for every page under /admin (except /admin/login). The API
- * remains the real authority — this only decides what the browser shows.
- * Unauthenticated or non-admin visitors are sent to the login page.
+ * Client-side gate + chrome (sidebar/topbar) for every page under /admin
+ * except /admin/login. The API remains the real authority — this only decides
+ * what the browser shows. Unauthenticated or non-admin visitors are sent to
+ * the login page (with returnTo, as in the legacy project).
  */
 export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [state, setState] = useState<GateState>({ status: "loading" });
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-
   const [attempt, setAttempt] = useState(0);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    const toLogin = () => router.replace(`/admin/login?returnTo=${encodeURIComponent(pathname)}`);
     fetchCurrentUser()
       .then((user) => {
         if (cancelled) return;
         if (!isAdminRole(user.role)) {
-          router.replace("/admin/login");
+          toLogin();
           return;
         }
         setState({ status: "ok", user });
@@ -41,7 +43,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       .catch((err: unknown) => {
         if (cancelled) return;
         if (err instanceof ApiClientError && (err.status === 401 || err.status === 403 || err.status === 404)) {
-          router.replace("/admin/login");
+          toLogin();
           return;
         }
         setState({ status: "network-error" });
@@ -49,10 +51,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [router, attempt]);
+  }, [router, pathname, attempt]);
 
   async function handleLogout() {
-    setIsLoggingOut(true);
     try {
       await logoutCurrentSession();
     } catch {
@@ -61,44 +62,52 @@ export function AdminShell({ children }: { children: ReactNode }) {
     router.replace("/admin/login");
   }
 
-  if (state.status === "loading") {
-    return (
-      <div className="flex flex-col gap-4" role="status" aria-label="در حال بارگذاری">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-      </div>
-    );
-  }
-
   if (state.status === "network-error") {
     return (
-      <StateMessage
-        icon={WifiOff}
-        title="ارتباط با سرور برقرار نشد"
-        description="اتصال اینترنت خود را بررسی کنید و دوباره تلاش کنید."
-        action={<Button onClick={() => {
-              setState({ status: "loading" });
-              setAttempt((n) => n + 1);
-            }}>تلاش دوباره</Button>}
-      />
+      <div className="flex min-h-screen items-center justify-center bg-[#F7F9F8]">
+        <StateMessage
+          tone="error"
+          icon={WifiOff}
+          title="ارتباط با سرور برقرار نشد"
+          description="اتصال اینترنت خود را بررسی کنید و دوباره تلاش کنید."
+          action={
+            <Button
+              size="sm"
+              onClick={() => {
+                setState({ status: "loading" });
+                setAttempt((n) => n + 1);
+              }}
+            >
+              تلاش دوباره
+            </Button>
+          }
+        />
+      </div>
     );
   }
 
-  const { user } = state;
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-4 border-b border-line pb-4">
-        <div className="flex flex-col">
-          {/* §17: until a name is registered, use a generic identity, never an invented one. */}
-          <span className="text-base font-medium text-ink">{user.name?.trim() || "کاربر"}</span>
-          <span className="text-sm text-muted">{ROLE_LABELS[user.role] ?? user.role}</span>
-        </div>
-        <Button variant="secondary" size="sm" onClick={handleLogout} isLoading={isLoggingOut}>
-          <LogOut className="size-4" aria-hidden="true" />
-          خروج
-        </Button>
+  if (state.status === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F7F9F8]" role="status" aria-label="در حال بارگذاری">
+        <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
       </div>
-      {children}
+    );
+  }
+
+  const meta = pageMeta[pathname] ?? { title: "پنل مدیریت", subtitle: "" };
+  return (
+    <div className="flex min-h-screen bg-[#F7F9F8]">
+      <AdminSidebar open={drawerOpen} onClose={() => setDrawerOpen(false)} user={state.user} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <AdminTopbar
+          onMenuClick={() => setDrawerOpen(true)}
+          onLogout={handleLogout}
+          title={meta.title}
+          subtitle={meta.subtitle}
+          user={state.user}
+        />
+        <main className="flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">{children}</main>
+      </div>
     </div>
   );
 }
