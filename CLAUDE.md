@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. بعدی پس از تأیید: صفحه‌ی ۳ Categories
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۲ کامل. بعدی پس از تأیید: مرحله‌ی ۳ نقشه (Provider interface)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -178,6 +178,23 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **تست:** `npm run verify` پاس؛ ۱۱۲ تست (۹ تست Zod، ۱۰ تست کامپوننت کارت‌ها، helper پول/رقم فارسی). smoke روی سرور production با توکن امضاشده: نقش customer → ۴۰۳، مبلغ اعشاری/منفی/رشته‌ای/نام خالی/رمز کوتاه → ۴۰۰ قبل از هر اتصال DB.
 - **اجرا نشده (محدودیت sandbox):** تست یکپارچه‌ی `profileSettings.integration.test.ts` (نوشته شده، نیاز به MongoDB)، مسیر موفق واقعی API با DB، بررسی بصری ۳۷۵/۷۶۸/۱۲۸۰، axe، E2E، ارسال واقعی sms.ir.
 - **نکته‌ی عملیاتی:** `getEnv()` در production با `SMS_PROVIDER=console` می‌ترکد و چون `requireAuth` همه‌ی خطاها را «نشست نامعتبر» گزارش می‌کند، اشتباه در env ورسل به‌شکل ۴۰۱ همه‌جا دیده می‌شود.
+
+## قانون شماره‌گذاری فازهای میانی (دستور کاربر)
+
+هر کار جدیدی که کاربر بین فازها بخواهد و در MASTER-PROMPT نباشد، یک **فاز نیم** است و به‌شکل `N.5` ثبت می‌شود (مثلاً بین فاز ۴ و ۵: فاز ۴.۵). ترتیب اجرا همچنان بر اساس تأیید کاربر است.
+
+## Phase 4.5 — سیستم نقشه، آدرس‌یابی و مسیریابی (Multi-Provider)
+
+مرجع: پرامپت معماری کاربر (Neshan + Map.ir + Google). معماری: `Frontend → /api/v1/maps/* → MapService → MapProvider → Neshan/Map.ir/Google`؛ هیچ کد کسب‌وکاری نباید مستقیم به Provider وابسته باشد. کاربر تأیید کرد: (۱) ساختار `app/src/lib/server/maps/` + مسیرهای `/api/v1/maps/*`، (۲) Address همان embedded در User می‌ماند با فیلدهای نرمال‌شده‌ی جدید (فاز ۱۰ نقشه)، (۳) Cache به‌شکل رابط `MapCache` با پیاده‌سازی in-memory (روی Vercel serverless محدود است)، (۴) هر فاز با گزارش و توقف.
+
+**مراحل داخلی (شماره‌ی نقشه‌ی خودش؛ بدون تأیید کاربر وارد مرحله‌ی بعد نمی‌شویم):**
+1. تحلیل مخزن — ✅ انجام و تأیید شد.
+2. دامنه‌ی نقشه (`packages/shared/src/maps/types.ts`: `Coordinates`، `NormalizedAddress`، `GeocodeResult`، `PlaceResult`، `RouteResult`، `RouteGeometry`، schema مختصات) — ✅ پیاده‌سازی شد؛ منتظر تأیید. فیلد ناموجود همیشه `null` صریح است. هندسه‌ی مسیر GeoJSON با ترتیب `[lng, lat]`. Route Matrix عمداً هنوز تعریف نشده (YAGNI، فاز ۳).
+3. تا ۱۷. Provider interface، Neshan، Map.ir، Google، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+- **پس از فاز ۱۲–۱۳ نقشه:** افزودن لوکیشن به کارت «اطلاعات فروشگاه» در Settings (نیازمند افزودن `latitude/longitude` اختیاری به `StoreSettings`؛ تأیید کاربر لازم است).
+
+**کلیدها (تصمیم کاربر):** Neshan فقط **یک کلید** دارد → یک متغیر `NESHAN_API_KEY` (سرور: هدر `Api-Key`؛ SDK نقشه‌ی مرورگر هم همان کلید را می‌گیرد — چون کلید ناچار در مرورگر دیده می‌شود، باید در پنل نشان محدود شود). نام‌های محیطی رزروشده در `app/.env.example` (ولی تا مرحله‌ی ۷ در `env.ts` اعتبارسنجی نمی‌شوند): `MAP_PROVIDER`، `NESHAN_API_KEY`، `MAPIR_API_KEY`، `GOOGLE_MAPS_API_KEY`، `MAP_FALLBACK_PROVIDER`، `MAP_ENABLE_COMPARISON`، `MAP_ENABLE_ROUTE_MATRIX`، `MAP_REQUEST_TIMEOUT_MS`، `MAP_MAX_RETRIES`، `MAP_CACHE_ENABLED`، `MAP_CACHE_TTL_SECONDS`.
+**تصمیم باز (مرحله‌ی ۱۲):** فرض پیش‌فرض این است که کاشی‌های نقشه همیشه از Neshan رندر شوند و Provider فعال فقط geocode/search/route را عوض کند؛ اگر خواستید نقشه‌ی Google/Map.ir هم رندر شود، کلید مرورگر جدا لازم می‌شود.
 
 ## کارهای تأییدنشده / محدودیت شناخته‌شده
 
