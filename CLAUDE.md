@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۲ کامل. بعدی پس از تأیید: مرحله‌ی ۳ نقشه (Provider interface)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۳ کامل. بعدی پس از تأیید: مرحله‌ی ۴ نقشه (NeshanProvider)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -189,8 +189,9 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 **مراحل داخلی (شماره‌ی نقشه‌ی خودش؛ بدون تأیید کاربر وارد مرحله‌ی بعد نمی‌شویم):**
 1. تحلیل مخزن — ✅ انجام و تأیید شد.
-2. دامنه‌ی نقشه (`packages/shared/src/maps/types.ts`: `Coordinates`، `NormalizedAddress`، `GeocodeResult`، `PlaceResult`، `RouteResult`، `RouteGeometry`، schema مختصات) — ✅ پیاده‌سازی شد؛ منتظر تأیید. فیلد ناموجود همیشه `null` صریح است. هندسه‌ی مسیر GeoJSON با ترتیب `[lng, lat]`. Route Matrix عمداً هنوز تعریف نشده (YAGNI، فاز ۳).
-3. تا ۱۷. Provider interface، Neshan، Map.ir، Google، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+2. دامنه‌ی نقشه — ✅ تأیید شد (`packages/shared/src/maps/types.ts`: `Coordinates`، `NormalizedAddress`، `GeocodeResult`، `PlaceResult`، `RouteResult`، `RouteGeometry`، schema مختصات) فیلد ناموجود همیشه `null` صریح است. هندسه‌ی مسیر GeoJSON با ترتیب `[lng, lat]`. Route Matrix عمداً هنوز تعریف نشده (YAGNI، فاز ۳).
+3. Provider interfaces — ✅ پیاده‌سازی شد؛ منتظر تأیید. `app/src/lib/server/maps/`: `provider.ts` (`MapProvider` = `GeocodingProvider` + `PlacesProvider` + `RoutingProvider` + `name` + `capabilities`؛ `getRouteMatrix` اختیاری)، `errors.ts` (`MapProviderError{provider,operation,code,message,retryable}` با کدهای `INVALID_REQUEST/AUTH_FAILED/RATE_LIMIT/TIMEOUT/NETWORK/PROVIDER_UNAVAILABLE/NO_RESULT/INVALID_RESPONSE/UNSUPPORTED_OPERATION`؛ `errorFromHttpStatus` یکسان برای هر سه provider؛ `toSafeJSON()` بدون هیچ header/URL/کلید)، `testing/FakeMapProvider.ts` (فقط برای تست). قواعد: Retry فقط برای `TIMEOUT/NETWORK/PROVIDER_UNAVAILABLE/RATE_LIMIT`؛ Fallback فقط برای `TIMEOUT/NETWORK/PROVIDER_UNAVAILABLE` (نه AUTH_FAILED/INVALID_REQUEST/RATE_LIMIT). `RouteMatrixResult` به دامنه‌ی مشترک اضافه شد. **Capability Matrix واقعی هر provider** در مرحله‌ی خودش از مستندات رسمی ثبت می‌شود، نه حدسی.
+4. تا ۱۷. Neshan، Map.ir، Google، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
 - **پس از فاز ۱۲–۱۳ نقشه:** افزودن لوکیشن به کارت «اطلاعات فروشگاه» در Settings (نیازمند افزودن `latitude/longitude` اختیاری به `StoreSettings`؛ تأیید کاربر لازم است).
 
 **کلیدها (تصمیم کاربر):** Neshan فقط **یک کلید** دارد → یک متغیر `NESHAN_API_KEY` (سرور: هدر `Api-Key`؛ SDK نقشه‌ی مرورگر هم همان کلید را می‌گیرد — چون کلید ناچار در مرورگر دیده می‌شود، باید در پنل نشان محدود شود). نام‌های محیطی رزروشده در `app/.env.example` (ولی تا مرحله‌ی ۷ در `env.ts` اعتبارسنجی نمی‌شوند): `MAP_PROVIDER`، `NESHAN_API_KEY`، `MAPIR_API_KEY`، `GOOGLE_MAPS_API_KEY`، `MAP_FALLBACK_PROVIDER`، `MAP_ENABLE_COMPARISON`، `MAP_ENABLE_ROUTE_MATRIX`، `MAP_REQUEST_TIMEOUT_MS`، `MAP_MAX_RETRIES`، `MAP_CACHE_ENABLED`، `MAP_CACHE_TTL_SECONDS`.

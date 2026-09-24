@@ -102,6 +102,21 @@ export interface RouteResult {
   meta: MapResultMeta;
 }
 
+/**
+ * origins × destinations grid. A cell is null when the provider could not
+ * route that pair — never 0, which would look like "same place". Row i /
+ * column j corresponds to origins[i] / destinations[j].
+ */
+export interface RouteMatrixCell {
+  distanceMeters: number | null;
+  durationSeconds: number | null;
+}
+
+export interface RouteMatrixResult {
+  rows: RouteMatrixCell[][];
+  meta: MapResultMeta;
+}
+
 // ------------------------------------------------------------------ Requests
 
 export const routeRequestSchema = z.object({
