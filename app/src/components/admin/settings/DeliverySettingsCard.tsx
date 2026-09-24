@@ -5,7 +5,7 @@ import { Pencil, Truck } from "lucide-react";
 import { Card } from "@/components/ui";
 import { errorMessage } from "@/lib/client/adminAuth";
 import { fetchShippingSettings, saveShippingSettings, type ShippingSettings } from "@/lib/client/adminSettings";
-import { formatToman, parseTomanInput } from "@/lib/client/format";
+import { formatNumberInput, formatToman, parseTomanInput } from "@/lib/client/format";
 import { CardTitle, Field, InfoRow, InlineError, InlineSuccess } from "./fields";
 import { FormActions } from "./FormActions";
 import { LoadErrorLine, LoadingLine } from "./LoadStatus";
@@ -22,8 +22,8 @@ export function DeliverySettingsCard() {
 
   const startEditing = (current: ShippingSettings) => {
     setDraft({
-      fee: current.expressDeliveryFee === null ? "" : String(current.expressDeliveryFee),
-      threshold: current.freeDeliveryThreshold === null ? "" : String(current.freeDeliveryThreshold),
+      fee: current.expressDeliveryFee === null ? "" : formatNumberInput(String(current.expressDeliveryFee)),
+      threshold: current.freeDeliveryThreshold === null ? "" : formatNumberInput(String(current.freeDeliveryThreshold)),
     });
     setError(null);
     setSaved(false);
@@ -80,14 +80,14 @@ export function DeliverySettingsCard() {
             inputMode="numeric"
             dir="ltr"
             value={draft.fee}
-            onChange={(e) => setDraft((d) => ({ ...d, fee: e.target.value }))}
+            onChange={(e) => setDraft((d) => ({ ...d, fee: formatNumberInput(e.target.value) }))}
           />
           <Field
             label="حداقل مبلغ برای ارسال رایگان (تومان)"
             inputMode="numeric"
             dir="ltr"
             value={draft.threshold}
-            onChange={(e) => setDraft((d) => ({ ...d, threshold: e.target.value }))}
+            onChange={(e) => setDraft((d) => ({ ...d, threshold: formatNumberInput(e.target.value) }))}
           />
           <InlineError message={error} />
           <FormActions saving={saving} onCancel={() => setEditing(false)} />

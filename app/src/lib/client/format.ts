@@ -20,3 +20,16 @@ export function parseTomanInput(value: string): number | null {
 export function formatToman(amount: number): string {
   return `${amount.toLocaleString("fa-IR")} تومان`;
 }
+
+/**
+ * Live formatting for money/number inputs (project rule: numbers are always
+ * shown with the Persian thousands separator, never as a bare digit run).
+ * Keeps digits only — decimals and signs cannot be typed — and returns
+ * "۲۵٬۰۰۰"-style text; empty input stays empty. Round-trips through parseTomanInput.
+ */
+export function formatNumberInput(value: string): string {
+  const digits = toEnglishDigits(value).replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  if (!digits) return "";
+  const n = Number(digits);
+  return Number.isSafeInteger(n) ? n.toLocaleString("fa-IR") : "";
+}

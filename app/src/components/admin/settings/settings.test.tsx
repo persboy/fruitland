@@ -48,11 +48,22 @@ describe("DeliverySettingsCard", () => {
     expect(screen.getByText("تنظیمات ارسال ذخیره شد")).toBeInTheDocument();
   });
 
-  it("rejects non-integer money without calling the API", async () => {
+  it("formats typed digits live with the Persian thousands separator, and blocks decimals/letters", async () => {
     api.fetchShippingSettings.mockResolvedValue({ expressDeliveryFee: 1000, freeDeliveryThreshold: 2000, isConfigured: true });
     render(<DeliverySettingsCard />);
     fireEvent.click(await screen.findByRole("button", { name: "ویرایش" }));
-    fill(/هزینه ارسال فوری/, "12.5");
+    expect(screen.getByLabelText(/هزینه ارسال فوری/)).toHaveValue("۱٬۰۰۰"); // initial value is formatted too
+    fill(/هزینه ارسال فوری/, "1234567");
+    expect(screen.getByLabelText(/هزینه ارسال فوری/)).toHaveValue("۱٬۲۳۴٬۵۶۷");
+    fill(/هزینه ارسال فوری/, "12.5abc");
+    expect(screen.getByLabelText(/هزینه ارسال فوری/)).toHaveValue("۱۲۵");
+  });
+
+  it("rejects an empty amount without calling the API", async () => {
+    api.fetchShippingSettings.mockResolvedValue({ expressDeliveryFee: 1000, freeDeliveryThreshold: 2000, isConfigured: true });
+    render(<DeliverySettingsCard />);
+    fireEvent.click(await screen.findByRole("button", { name: "ویرایش" }));
+    fill(/هزینه ارسال فوری/, "");
     fireEvent.click(screen.getByRole("button", { name: "ذخیره" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("عدد صحیح");
     expect(api.saveShippingSettings).not.toHaveBeenCalled();

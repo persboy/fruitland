@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatToman, parseTomanInput, toEnglishDigits } from "./format";
+import { formatNumberInput, formatToman, parseTomanInput, toEnglishDigits } from "./format";
 
 describe("parseTomanInput", () => {
   it("parses ASCII, Persian and Arabic digits and separators", () => {
@@ -20,5 +20,16 @@ describe("formatting", () => {
   it("converts digits and formats Toman in Persian", () => {
     expect(toEnglishDigits("۰۹۱۲")).toBe("0912");
     expect(formatToman(130000)).toBe("۱۳۰٬۰۰۰ تومان");
+  });
+});
+
+describe("formatNumberInput", () => {
+  it("adds the Persian separator, strips non-digits and leading zeros, and round-trips", () => {
+    expect(formatNumberInput("25000")).toBe("۲۵٬۰۰۰");
+    expect(formatNumberInput("۲۵٬۰۰۰")).toBe("۲۵٬۰۰۰");
+    expect(formatNumberInput("0007")).toBe("۷");
+    expect(formatNumberInput("0")).toBe("۰");
+    expect(formatNumberInput("abc")).toBe("");
+    expect(parseTomanInput(formatNumberInput("1234567"))).toBe(1234567);
   });
 });
