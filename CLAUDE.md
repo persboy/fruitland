@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۵ (MapIrProvider، فقط reverseGeocode) کامل. بعدی پس از تأیید: مرحله‌ی ۶ نقشه (GoogleMapsProvider)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۶ (GoogleMapsProvider، هر ۵ قابلیت) کامل. بعدی پس از تأیید: مرحله‌ی ۷ نقشه (Provider Factory/Registry)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -202,7 +202,16 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    **نگاشت reverse:** `province`→province، `city`→city، `region` («منطقه شهرداری»)→district، `neighborhood`→neighborhood، `primary`→street، `plaque` (عددی)→plaque (رشته)، `postal_code`→postalCode، `address`→formattedAddress؛ Map.ir فیلد جدایی برای کوچه یا واحد ندارد → `alley`/`unit` = `null`.
    **خطاها:** Map.ir کد خطای اختصاصی مستند نکرده (برخلاف Neshan)، پس فقط نگاشت عمومی HTTP اعمال شد (۴۰۱/۴۰۳→AUTH_FAILED، ۴۲۹→RATE_LIMIT، 5xx→PROVIDER_UNAVAILABLE)؛ چیزی حدس زده نشد.
    **کلید:** طبق مستندات، همان کلید REST (`x-api-key`) در Web SDK هم استفاده می‌شود → **یک credential مشترک** (برخلاف Neshan). پس فقط `MAPIR_API_KEY` لازم است؛ ردیف Map.ir در جدول credential فاز قبل به «تأیید شد: یک credential» به‌روزرسانی شد.
-7. تا ۱۷. GoogleMapsProvider، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+7. GoogleMapsProvider — ✅ پیاده‌سازی شد؛ منتظر تأیید. `maps/providers/google.provider.ts`. تنها Providerی که **هر پنج قابلیت** را دارد، چون مستندات رسمی Google (بررسی‌شده ۲۰۲۶-۰۹-۲۵) برای همه پاسخ کامل و تأییدشده داد:
+   - **reverseGeocode/geocode:** `GET https://maps.googleapis.com/maps/api/geocode/json?latlng=|address=&key=`. ⚠️ **تفاوت مهم با Neshan/Map.ir:** کلید اینجا **query param** است نه هدر، و HTTP همیشه ۲۰۰ برمی‌گردد؛ موفقیت/خطا فقط از فیلد JSON `status` خوانده می‌شود (`OK/ZERO_RESULTS/OVER_QUERY_LIMIT/OVER_DAILY_LIMIT/REQUEST_DENIED/INVALID_REQUEST/UNKNOWN_ERROR`). این یک ناسازگاری معماری نیست (طبق دستور کاربر بند ۱۰ فاز ۶، چون هیچ تغییری در contract مشترک لازم نشد؛ فقط adapter داخلی خودش را با شکل مستندشده‌ی همین API تطبیق داد) — فقط باید حواس‌مان باشد این کلید فقط داخل URL درخواست می‌رود، نه در خطا/لاگ (تست شده).
+   - **searchPlaces:** `POST https://places.googleapis.com/v1/places:searchText` (Places API **New**)، هدر `X-Goog-Api-Key` + `X-Goog-FieldMask` اجباری؛ `locationBias.circle` برای `options.near`.
+   - **getRoute:** `POST https://routes.googleapis.com/directions/v2:computeRoutes` (Routes API). `duration` رشته‌ای «۲۴۲۰s» است، پارس شد. Geometry از همان دیکدر پلی‌لاین Neshan (الگوریتم مشترک گوگل) استفاده می‌کند.
+   - **routeMatrix:** `POST https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix`. ⚠️ پاسخ یک **آرایه‌ی برهنه** است (نه شیء)، و مستندات صریح می‌گویند ترتیب عناصر تضمین‌شده نیست → با `originIndex/destinationIndex` در grid `rows[][]` جای می‌گیرد، نه ترتیب دریافت. سلولی که `condition!=="ROUTE_EXISTS"` یا `status` غیرخالی داشته باشد `null` می‌ماند (هرگز ۰).
+   **Capability Matrix (Google):** هر پنج قابلیت ✅. برای POST-ها errorFromHttpStatus عمومی مشترک با بقیه استفاده شد (پاکت خطای استاندارد Google `{error:{code,status,message}}`)؛ فقط Geocoding قدیمی نگاشت اختصاصی خودش را دارد (بالا). `OVER_DAILY_LIMIT`→`AUTH_FAILED` غیرقابل‌retry (مستندات: کلید/billing، نه نرخ لحظه‌ای)، `OVER_QUERY_LIMIT`→`RATE_LIMIT` قابل‌retry، `UNKNOWN_ERROR`→`PROVIDER_UNAVAILABLE` قابل‌retry (مستندات صراحتاً می‌گویند تلاش دوباره ممکن است جواب بدهد).
+   **نوع وسیله:** هر سه مقدار مشترک پروژه (`car→DRIVE`, `motorcycle→TWO_WHEELER`, `bicycle→BICYCLE`) رسماً مستند و پشتیبانی‌شده‌اند (WALK/BICYCLE/TWO_WHEELER رسماً «beta» اعلام شده‌اند، ولی endpoint و پاسخشان کاملاً مستند است) — پس هیچ‌کدام `UNSUPPORTED_OPERATION` نشدند.
+   **نگاشت آدرس:** از `address_components[].types` استاندارد گوگل: `administrative_area_level_1`→province، `locality` (یا در نبودش `administrative_area_level_2`)→city، `sublocality`→district، `neighborhood`→neighborhood، `route`→street، `street_number`→plaque، `postal_code`→postalCode. گوگل نوع جداگانه‌ای برای کوچه یا واحد ندارد → `alley`/`unit`=`null`.
+   **credential:** فقط **یک متغیر سرور**: `GOOGLE_MAPS_API_KEY`، با سه API فعال (Geocoding، Places New، Routes) روی همان کلید. طبق دستور صریح کاربر، رندر مرورگر در این فاز پیاده نشد؛ توصیه‌ی رسمی Google (کلید سرور با IP restriction جدا از کلید مرورگر با HTTP referrer restriction) فقط مستند شد، نه اجرا.
+8. تا ۱۷. Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
 
 ### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
 

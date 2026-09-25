@@ -12,10 +12,14 @@ export interface RequestJsonOptions {
   fetchImpl?: typeof fetch;
   /** Provider-specific HTTP status → error (e.g. Neshan's 480–483). Return null to use the generic mapping. */
   mapHttpError?: (status: number) => MapProviderError | null;
+  /** Defaults to GET. Providers whose API is POST+JSON (Google's Places/Routes APIs) pass "POST" and `body`. */
+  method?: "GET" | "POST";
+  /** JSON-serializable request body; only meaningful with method "POST". */
+  body?: unknown;
 }
 
 /**
- * GET + JSON with timeout and normalized errors. Errors carry only
+ * GET/POST + JSON with timeout and normalized errors. Errors carry only
  * provider/operation/code — never the URL, headers or body — so an API key
  * (header or query) cannot leak through an error, a log line or an API response.
  */
@@ -24,8 +28,9 @@ export async function requestJson(options: RequestJsonOptions): Promise<unknown>
   let response: Response;
   try {
     response = await (options.fetchImpl ?? fetch)(options.url, {
-      method: "GET",
-      headers: options.headers,
+      method: options.method ?? "GET",
+      headers: options.body !== undefined ? { "Content-Type": "application/json", ...options.headers } : options.headers,
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: AbortSignal.timeout(options.timeoutMs),
     });
   } catch (err) {
