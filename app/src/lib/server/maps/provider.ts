@@ -1,5 +1,6 @@
 import type {
   Coordinates,
+  VehicleType,
   GeocodeResult,
   MapProviderName,
   PlaceResult,
@@ -23,6 +24,13 @@ export interface SearchPlacesOptions {
 export interface RouteOptions {
   /** Ask for the line geometry. Default true; pass false to save payload when only distance/time are needed. */
   includeGeometry?: boolean;
+  /**
+   * "car" | "motorcycle" | "bicycle" (shared VehicleType). Not hard-coded in
+   * business logic — each adapter maps it to whatever its own API expects and
+   * throws UNSUPPORTED_OPERATION for a vehicle its provider does not offer.
+   * Provider default (when omitted) is documented on that adapter.
+   */
+  vehicleType?: VehicleType;
 }
 
 export interface GeocodingProvider {

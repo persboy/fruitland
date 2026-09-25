@@ -68,6 +68,15 @@ describe("unsupportedOperation", () => {
   });
 });
 
+describe("RouteOptions.vehicleType", () => {
+  it("FakeMapProvider records whatever vehicleType is passed (business code never hard-codes a provider value)", async () => {
+    const fake = new FakeMapProvider();
+    const point = { latitude: 36.6769, longitude: 48.4963 };
+    await fake.getRoute(point, point, { vehicleType: "motorcycle" });
+    expect(fake.calls[0]).toEqual({ operation: "getRoute", args: [point, point, { vehicleType: "motorcycle" }] });
+  });
+});
+
 describe("FakeMapProvider (contract usability)", () => {
   it("implements MapProvider, records calls, and declares capabilities for every operation", async () => {
     const fake = new FakeMapProvider("google");

@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۴ کامل. بعدی پس از تأیید: مرحله‌ی ۵ نقشه (MapIrProvider)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۴ کامل + بررسی معماری Rendering/Service. طبق دستور کاربر، اجرای مرحله‌ی ۵ متوقف است تا تأیید. بعدی پس از تأیید: مرحله‌ی ۵ نقشه (MapIrProvider)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -196,7 +196,33 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    **نگاشت reverse:** `state`→province (پیشوند «استان » حذف)، `city`→city، `neighbourhood`→neighborhood، `route_name`→street، `municipality_zone`→district («منطقه N»)؛ `alley/plaque/unit/postalCode` = `null` (Neshan نمی‌دهد). نگاشت خطا: ۴۷۰→INVALID_REQUEST، ۴۸۰/۴۸۳→AUTH_FAILED، ۴۸۱ (سهمیه تمام)→RATE_LIMIT **غیرقابل‌retry**، ۴۸۲ (نرخ/دقیقه)→RATE_LIMIT قابل‌retry، ۵xx→PROVIDER_UNAVAILABLE.
    ⚠️ **کلید Neshan نوع دارد:** مستندات کد ۴۸۳ (`ApiKeyTypeError`) را «کلید با سرویس هم‌خوان نیست» تعریف می‌کند و در عمل کلید «Web Map» و «Web Service» جداست. سرور فقط `NESHAN_API_KEY` را می‌خواند و باید از نوع **سرویس** باشد. اگر کلید فعلی فقط برای نقشه است، تست زنده ۴۸۳ می‌دهد (پیام خطا همین را می‌گوید). کلید نقشه‌ی مرورگر در مرحله‌ی ۱۲ تعیین می‌شود.
    **باز:** نوع وسیله‌ی مسیر (`car` پیش‌فرض؛ موتور پیک؟) تصمیم کسب‌وکار نیست. تست زنده با کلید واقعی در sandbox ممکن نیست (مرحله‌ی ۱۶: `npm run test:maps:live`).
-5. تا ۱۷. Map.ir، Google، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+5. **بررسی معماری Rendering vs Service (میان‌فاز، به دستور کاربر — قبل از ادامه‌ی مرحله‌ی ۵ متوقف شد)** — ✅ انجام شد؛ منتظر تأیید. نتیجه در «تصمیم معماری Rendering/Service» زیر.
+6. تا ۱۷. MapIrProvider، GoogleMapsProvider، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+
+### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
+
+کاربر تأیید کرد که این دو لایه **مستقل** هستند و هیچ‌کدام نباید فرض «Neshan همیشه برای رندر» را hard-code کند:
+
+- **`MapProvider` (Service — همان چیزی که تا الان ساختیم):** reverseGeocode/geocode/searchPlaces/getRoute/routeMatrix. کاملاً سرور-به-سرور، Frontend هرگز مستقیم آن را صدا نمی‌زند.
+- **`MapRenderingProvider` (جدید، هنوز پیاده‌سازی نشده):** فقط نمایش کاشی/نقشه، Marker، Zoom، Pan در مرورگر. Frontend مستقیماً با SDK مرورگرِ همان provider حرف می‌زند (نه از طریق `/api/v1/maps/*`)، ولی انتخاب اینکه کدام provider رندر شود از همان config مرکزی (فعلاً `MAP_PROVIDER`، قابل جدا شدن به `MAP_RENDER_PROVIDER` در فاز رندر اگر لازم شد) می‌آید. Business logic (Checkout/Address/Order) به هیچ‌کدام از این دو لایه وابسته نیست.
+
+**Credential Matrix (بررسی‌شده از مستندات/منابع رسمی هر پلتفرم، ۲۰۲۶-۰۹-۲۴):**
+
+| Provider | Service API (سرور) | Map Rendering (مرورگر) | نتیجه |
+|---|---|---|---|
+| **Neshan** | کلید نوع «سرویس» (`Api-Key` هدر) | کلید **جدا**، نوع «نقشه وب» — در پنل هنگام ساخت کلید صراحتاً باید نوع «نقشه وب» انتخاب شود؛ خطای مستندشده‌ی ۴۸۳ (`ApiKeyTypeError`) دقیقاً همین ناهمخوانی را پوشش می‌دهد | **دو کلید، دو نوع credential** |
+| **Map.ir** | `x-api-key` هدر برای REST | همان توکن پروژه در Web/React SDK (`x-api-key` + هدر `Mapir-SDK`) — مدارک رسمی نشانه‌ای از کلید رندر جدا نشان نمی‌دهند | **به‌نظر یک credential مشترک** (باید در فاز Map.ir با مستندات کامل‌تر Web SDK Map.ir دوباره تأیید شود؛ فعلاً حدس قطعی نیست) |
+| **Google** | کلید استاندارد Google Maps Platform (Geocoding/Directions/Places API) | همان نوع کلید (Maps JavaScript API) — Google رسماً کلید سرور و مرورگر را «یک نوع» می‌داند ولی توصیه‌ی صریح دارد که برای هرکدام یک کلید جدا با محدودیت متفاوت بسازید (سرور: IP restriction؛ مرورگر: HTTP referrer restriction) | **یک نوع credential، ولی به دو کلید جدا با scope متفاوت توصیه می‌شود** |
+
+**نتیجه:** سه Provider سه الگوی متفاوت دارند، پس **abstraction مشترک برای رندر هنوز زودهنگام است** تا وقتی مرحله‌ی رندر واقعاً برسد؛ فقط این تصمیم ثبت می‌شود که `MapRenderingProvider` به‌عنوان یک interface مستقل از `MapProvider` طراحی خواهد شد (نه `NeshanRenderer extends NeshanProvider` یا مشابه آن)، و انتخاب و اعتبارسنجی credential رندر هرکدام در فاز خودش انجام می‌شود — نه الان.
+
+**ENV — طبق دستور کاربر، فقط چیزی که نقش و نوعش روشن است در `.env.example` می‌ماند:** `NESHAN_API_KEY` همچنان فقط برای Web Service سمت سرور است. هیچ متغیر رندر (مثل یک `NESHAN_MAP_KEY` حدسی) اضافه نشد؛ آن‌وقتی که فاز رندر برسد، بر اساس نتیجه‌ی نهایی این‌جا تعیین می‌شود.
+
+### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
+
+`RouteOptions.vehicleType?: VehicleType` (از enum مشترک `car|motorcycle|bicycle`) به رابط `RoutingProvider` اضافه شد. Business logic هیچ مقداری را ثابت نمی‌فرستد. `NeshanProvider.getRoute` این را به `type=car` یا `type=motorcycle` نگاشت می‌کند (Neshan بایسیکل ندارد → `bicycle` باعث `UNSUPPORTED_OPERATION` می‌شود، نه fallback خاموش). اگر caller چیزی ندهد، پیش‌فرض adapter (نه Business logic) اعمال می‌شود — برای Neshan `car`.
+
+
 - **پس از فاز ۱۲–۱۳ نقشه:** افزودن لوکیشن به کارت «اطلاعات فروشگاه» در Settings (نیازمند افزودن `latitude/longitude` اختیاری به `StoreSettings`؛ تأیید کاربر لازم است).
 
 **کلیدها:** کاربر گزارش داد در پنل Neshan فقط یک کلید می‌بیند → سرور فقط `NESHAN_API_KEY` را می‌خواند. ⚠️ مستندات Neshan برای کلید «نوع» تعریف می‌کند (خطای ۴۸۳)؛ اگر تست زنده ۴۸۳ داد، باید کلید نوع سرویس ساخته شود (جزئیات در مرحله‌ی ۴ بالا). کلید مرورگر چون ناچار در مرورگر دیده می‌شود باید در پنل به دامنه محدود شود. نام‌های محیطی رزروشده در `app/.env.example` (ولی تا مرحله‌ی ۷ در `env.ts` اعتبارسنجی نمی‌شوند): `MAP_PROVIDER`، `NESHAN_API_KEY`، `MAPIR_API_KEY`، `GOOGLE_MAPS_API_KEY`، `MAP_FALLBACK_PROVIDER`، `MAP_ENABLE_COMPARISON`، `MAP_ENABLE_ROUTE_MATRIX`، `MAP_REQUEST_TIMEOUT_MS`، `MAP_MAX_RETRIES`، `MAP_CACHE_ENABLED`، `MAP_CACHE_TTL_SECONDS`.

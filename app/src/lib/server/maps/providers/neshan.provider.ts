@@ -7,7 +7,8 @@ import {
   type ReverseGeocodeResult,
   type RouteResult,
 } from "@fruitland/shared";
-import { MapProviderError, mapError, type MapOperation } from "../errors";
+import type { VehicleType } from "@fruitland/shared";
+import { MapProviderError, mapError, unsupportedOperation, type MapOperation } from "../errors";
 import { requestJson } from "../http";
 import { decodePolylineToGeoJson } from "../polyline";
 import type { MapCapabilities, MapProvider, RouteOptions, SearchPlacesOptions } from "../provider";
@@ -200,13 +201,21 @@ export class NeshanProvider implements MapProvider {
     return options.limit ? places.slice(0, options.limit) : places;
   }
 
+  /** Neshan's /v4/direction `type` parameter. Neshan does not offer a bicycle profile. */
+  private static readonly VEHICLE_TYPE_MAP: Partial<Record<VehicleType, "car" | "motorcycle">> = {
+    car: "car",
+    motorcycle: "motorcycle",
+  };
+
   async getRoute(origin: Coordinates, destination: Coordinates, options?: RouteOptions): Promise<RouteResult> {
     this.assertCoordinates("getRoute", origin, destination);
-    // "car" is the default: courier vehicle (motorcycle vs car) is not an approved business rule yet.
+    const requested = options?.vehicleType ?? "car"; // caller decides; "car" is only the fallback when unspecified
+    const neshanType = NeshanProvider.VEHICLE_TYPE_MAP[requested];
+    if (!neshanType) throw unsupportedOperation("neshan", "getRoute");
     const body = await this.get(
       "getRoute",
       "/v4/direction",
-      `type=car&origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}`,
+      `type=${neshanType}&origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}`,
     );
     if (!isRecord(body)) throw mapError("neshan", "getRoute", "INVALID_RESPONSE");
 

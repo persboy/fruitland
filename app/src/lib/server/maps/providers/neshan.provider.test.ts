@@ -280,3 +280,23 @@ describe("decodePolylineToGeoJson", () => {
     expect(decodePolylineToGeoJson("")).toEqual([]);
   });
 });
+
+describe("vehicleType (configurable, not hard-coded)", () => {
+  it("defaults to car and maps motorcycle to Neshan's type=motorcycle", async () => {
+    const carFetch = respond(json(DIRECTION_DOC_EXAMPLE));
+    await make(carFetch).getRoute(point, other);
+    const [carUrl] = (carFetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(carUrl).toContain("type=car");
+
+    const motoFetch = respond(json(DIRECTION_DOC_EXAMPLE));
+    await make(motoFetch).getRoute(point, other, { vehicleType: "motorcycle" });
+    const [motoUrl] = (motoFetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(motoUrl).toContain("type=motorcycle");
+  });
+
+  it("an unsupported vehicle (bicycle) is refused without calling Neshan", async () => {
+    const fetchImpl = respond();
+    await expect(make(fetchImpl).getRoute(point, other, { vehicleType: "bicycle" })).rejects.toMatchObject({ code: "UNSUPPORTED_OPERATION" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
