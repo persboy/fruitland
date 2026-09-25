@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۴ کامل + بررسی معماری Rendering/Service. طبق دستور کاربر، اجرای مرحله‌ی ۵ متوقف است تا تأیید. بعدی پس از تأیید: مرحله‌ی ۵ نقشه (MapIrProvider)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۵ (MapIrProvider، فقط reverseGeocode) کامل. بعدی پس از تأیید: مرحله‌ی ۶ نقشه (GoogleMapsProvider)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -197,7 +197,12 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    ⚠️ **کلید Neshan نوع دارد:** مستندات کد ۴۸۳ (`ApiKeyTypeError`) را «کلید با سرویس هم‌خوان نیست» تعریف می‌کند و در عمل کلید «Web Map» و «Web Service» جداست. سرور فقط `NESHAN_API_KEY` را می‌خواند و باید از نوع **سرویس** باشد. اگر کلید فعلی فقط برای نقشه است، تست زنده ۴۸۳ می‌دهد (پیام خطا همین را می‌گوید). کلید نقشه‌ی مرورگر در مرحله‌ی ۱۲ تعیین می‌شود.
    **باز:** نوع وسیله‌ی مسیر (`car` پیش‌فرض؛ موتور پیک؟) تصمیم کسب‌وکار نیست. تست زنده با کلید واقعی در sandbox ممکن نیست (مرحله‌ی ۱۶: `npm run test:maps:live`).
 5. **بررسی معماری Rendering vs Service (میان‌فاز، به دستور کاربر — قبل از ادامه‌ی مرحله‌ی ۵ متوقف شد)** — ✅ انجام شد؛ منتظر تأیید. نتیجه در «تصمیم معماری Rendering/Service» زیر.
-6. تا ۱۷. MapIrProvider، GoogleMapsProvider، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+6. MapIrProvider — ✅ پیاده‌سازی شد؛ منتظر تأیید. `maps/providers/mapir.provider.ts`. از منابع رسمی Map.ir (بررسی‌شده ۲۰۲۶-۰۹-۲۵: `help.map.ir/reverse_api` — جدول کامل پارامتر ورودی/خروجی؛ `corp.map.ir/map-services/unauthorized` — کد ۴۰۱ برای کلید نامعتبر/غایب؛ دامنه‌ی پایه‌ی `https://map.ir` از پکیج رسمی Laravel مپ تأیید شد): `GET https://map.ir/reverse/?lat&lon` با هدر `x-api-key`.
+   **Capability Matrix (Map.ir):** reverseGeocode ✅ · **geocode ❌ · searchPlaces ❌ · getRoute ❌ · routeMatrix ❌** — Map.ir رسماً صفحات جداگانه برای Search v1/v2، Route، Distance Matrix و Places دارد، ولی fetch مستقیم این صفحات در همین session به دلیل robots.txt مسدود شد و نتوانستم مثال کامل و رسمی پاسخ (field-by-field) هیچ‌کدام را تأیید کنم؛ طبق قانون «هرگز حدس نزن»، به‌جای پیاده‌سازی از روی قطعات نیمه‌رسمی (npm wrapperهای شخص ثالث)، همه `UNSUPPORTED_OPERATION` ماندند. اگر متن کامل هرکدام از این صفحات را (مثل کاری که برای Geocoding نشان کردید) بفرستید، در همین فاز (نه ۵.۵) اضافه می‌شوند، چون قابلیت از پیش برنامه‌ریزی‌شده‌ی همین Provider است، نه نیاز جدید.
+   **نگاشت reverse:** `province`→province، `city`→city، `region` («منطقه شهرداری»)→district، `neighborhood`→neighborhood، `primary`→street، `plaque` (عددی)→plaque (رشته)، `postal_code`→postalCode، `address`→formattedAddress؛ Map.ir فیلد جدایی برای کوچه یا واحد ندارد → `alley`/`unit` = `null`.
+   **خطاها:** Map.ir کد خطای اختصاصی مستند نکرده (برخلاف Neshan)، پس فقط نگاشت عمومی HTTP اعمال شد (۴۰۱/۴۰۳→AUTH_FAILED، ۴۲۹→RATE_LIMIT، 5xx→PROVIDER_UNAVAILABLE)؛ چیزی حدس زده نشد.
+   **کلید:** طبق مستندات، همان کلید REST (`x-api-key`) در Web SDK هم استفاده می‌شود → **یک credential مشترک** (برخلاف Neshan). پس فقط `MAPIR_API_KEY` لازم است؛ ردیف Map.ir در جدول credential فاز قبل به «تأیید شد: یک credential» به‌روزرسانی شد.
+7. تا ۱۷. GoogleMapsProvider، Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
 
 ### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
 
@@ -211,7 +216,7 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 | Provider | Service API (سرور) | Map Rendering (مرورگر) | نتیجه |
 |---|---|---|---|
 | **Neshan** | کلید نوع «سرویس» (`Api-Key` هدر) | کلید **جدا**، نوع «نقشه وب» — در پنل هنگام ساخت کلید صراحتاً باید نوع «نقشه وب» انتخاب شود؛ خطای مستندشده‌ی ۴۸۳ (`ApiKeyTypeError`) دقیقاً همین ناهمخوانی را پوشش می‌دهد | **دو کلید، دو نوع credential** |
-| **Map.ir** | `x-api-key` هدر برای REST | همان توکن پروژه در Web/React SDK (`x-api-key` + هدر `Mapir-SDK`) — مدارک رسمی نشانه‌ای از کلید رندر جدا نشان نمی‌دهند | **به‌نظر یک credential مشترک** (باید در فاز Map.ir با مستندات کامل‌تر Web SDK Map.ir دوباره تأیید شود؛ فعلاً حدس قطعی نیست) |
+| **Map.ir** | `x-api-key` هدر برای REST | همان توکن پروژه در Web/React SDK (`x-api-key` + هدر `Mapir-SDK`) | **تأیید شد در مرحله‌ی MapIrProvider: یک credential مشترک** |
 | **Google** | کلید استاندارد Google Maps Platform (Geocoding/Directions/Places API) | همان نوع کلید (Maps JavaScript API) — Google رسماً کلید سرور و مرورگر را «یک نوع» می‌داند ولی توصیه‌ی صریح دارد که برای هرکدام یک کلید جدا با محدودیت متفاوت بسازید (سرور: IP restriction؛ مرورگر: HTTP referrer restriction) | **یک نوع credential، ولی به دو کلید جدا با scope متفاوت توصیه می‌شود** |
 
 **نتیجه:** سه Provider سه الگوی متفاوت دارند، پس **abstraction مشترک برای رندر هنوز زودهنگام است** تا وقتی مرحله‌ی رندر واقعاً برسد؛ فقط این تصمیم ثبت می‌شود که `MapRenderingProvider` به‌عنوان یک interface مستقل از `MapProvider` طراحی خواهد شد (نه `NeshanRenderer extends NeshanProvider` یا مشابه آن)، و انتخاب و اعتبارسنجی credential رندر هرکدام در فاز خودش انجام می‌شود — نه الان.

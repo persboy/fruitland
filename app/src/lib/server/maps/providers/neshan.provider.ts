@@ -68,7 +68,8 @@ interface NeshanDirectionResponse {
 }
 
 const nonEmpty = (value: unknown): string | null => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export class NeshanProvider implements MapProvider {
   readonly name = "neshan" as const;
