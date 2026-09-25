@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۶ (GoogleMapsProvider، هر ۵ قابلیت) کامل. بعدی پس از تأیید: مرحله‌ی ۷ نقشه (Provider Factory/Registry)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۷ (Provider Factory/Registry) کامل. بعدی پس از تأیید: مرحله‌ی ۸ نقشه (MapService — retry/fallback)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -211,7 +211,11 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    **نوع وسیله:** هر سه مقدار مشترک پروژه (`car→DRIVE`, `motorcycle→TWO_WHEELER`, `bicycle→BICYCLE`) رسماً مستند و پشتیبانی‌شده‌اند (WALK/BICYCLE/TWO_WHEELER رسماً «beta» اعلام شده‌اند، ولی endpoint و پاسخشان کاملاً مستند است) — پس هیچ‌کدام `UNSUPPORTED_OPERATION` نشدند.
    **نگاشت آدرس:** از `address_components[].types` استاندارد گوگل: `administrative_area_level_1`→province، `locality` (یا در نبودش `administrative_area_level_2`)→city، `sublocality`→district، `neighborhood`→neighborhood، `route`→street، `street_number`→plaque، `postal_code`→postalCode. گوگل نوع جداگانه‌ای برای کوچه یا واحد ندارد → `alley`/`unit`=`null`.
    **credential:** فقط **یک متغیر سرور**: `GOOGLE_MAPS_API_KEY`، با سه API فعال (Geocoding، Places New، Routes) روی همان کلید. طبق دستور صریح کاربر، رندر مرورگر در این فاز پیاده نشد؛ توصیه‌ی رسمی Google (کلید سرور با IP restriction جدا از کلید مرورگر با HTTP referrer restriction) فقط مستند شد، نه اجرا.
-8. تا ۱۷. Registry، MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+8. Provider Factory / Registry — ✅ پیاده‌سازی شد؛ منتظر تأیید. `maps/registry.ts` (الگوی دقیقاً مشابه `services/sms/index.ts` موجود پروژه): `getMapProvider(name)` با شناسه‌ی پایدار `neshan|mapir|google` provider واقعی می‌سازد و کش می‌کند (stateless، یک نمونه به‌ازای هر نام، بدون بازسازی غیرضروری)؛ `getDefaultMapProvider()` از `MAP_PROVIDER` می‌خواند؛ `resetMapProviderRegistryForTests()` فقط برای تست. هیچ‌جای دیگر پروژه مجاز نیست مستقیم `new NeshanProvider(...)` و مشابه بسازد.
+   **اعتبارسنجی `MAP_PROVIDER` در `env.ts` (لایه‌ی پیکربندی واحد):** `z.enum(["neshan","mapir","google"]).default("neshan")` — مقدار نامعتبر باعث شکست واضح در همان لحظه‌ی بالا آمدن سرویس می‌شود (Zod error حاوی «MAP_PROVIDER»)، **هرگز fallback خاموش به provider دیگر نیست**. `NESHAN_API_KEY`/`MAPIR_API_KEY`/`GOOGLE_MAPS_API_KEY` هم اکنون رسماً در schema هستند (قبلاً فقط در `.env.example` رزرو بودند) ولی هرکدام تنها **وقتی همان provider واقعاً resolve شود** در `registry.ts` بررسی می‌شوند، نه در سطح env سراسری — یعنی نبودن `GOOGLE_MAPS_API_KEY` وقتی `MAP_PROVIDER=neshan` است، جلوی بالا آمدن سرویس را نمی‌گیرد (این طراحی صریحاً برای Comparison Mode آینده هم لازم است: هر provider خطای خودش را مستقل می‌دهد). `MAP_REQUEST_TIMEOUT_MS` (پیش‌فرض ۱۰۰۰۰) هم به schema اضافه شد چون ساخت هر provider به آن نیاز دارد؛ بقیه‌ی متغیرهای MapService (`MAP_MAX_RETRIES`, `MAP_CACHE_*`, `MAP_ENABLE_COMPARISON`, `MAP_FALLBACK_PROVIDER`) طبق مرز فاز ۷ **عمداً هنوز اعتبارسنجی نشدند** — فاز ۹ (MapService).
+   **MapService:** هنوز ساخته نشده (فاز ۹ خودِ نقشه). هیچ چیزی برای اتصال به registry وجود نداشت؛ registry آماده است تا MapService در فاز خودش مستقیماً `getDefaultMapProvider()`/`getMapProvider()` را صدا بزند، بدون آنکه پیاده‌سازی providerها را بشناسد.
+   **Rendering:** طبق دستور صریح کاربر، در این فاز هیچ registry یا کد رندری اضافه نشد.
+9. تا ۱۷. MapService، API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
 
 ### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
 

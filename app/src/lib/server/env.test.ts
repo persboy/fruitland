@@ -60,3 +60,36 @@ describe("getEnv", () => {
     expect(() => getEnv()).toThrow(/SMS_IR_API_KEY/);
   });
 });
+
+describe("MAP_PROVIDER", () => {
+  const base = () => {
+    vi.stubEnv("MONGODB_URI", "mongodb://localhost:27017/fruitland_test");
+    vi.stubEnv("JWT_ACCESS_SECRET", "test-access-secret");
+    vi.stubEnv("JWT_REFRESH_SECRET", "test-refresh-secret");
+  };
+
+  it("defaults to neshan when unset", async () => {
+    base();
+    const { getEnv } = await import("./env");
+    expect(getEnv().MAP_PROVIDER).toBe("neshan");
+  });
+
+  it("accepts mapir and google", async () => {
+    base();
+    vi.stubEnv("MAP_PROVIDER", "google");
+    const { getEnv } = await import("./env");
+    expect(getEnv().MAP_PROVIDER).toBe("google");
+  });
+
+  it("fails clearly on an unknown provider, never silently falling back", async () => {
+    base();
+    vi.stubEnv("MAP_PROVIDER", "openstreetmap");
+    const { getEnv } = await import("./env");
+    expect(() => getEnv()).toThrow(/MAP_PROVIDER/);
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+});
