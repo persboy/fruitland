@@ -43,11 +43,15 @@ const envSchema = z.object({
   SMS_IR_API_KEY: z.string().min(1).optional(),
   SMS_IR_TEMPLATE_ID: z.coerce.number().int().positive().optional(),
 
-  // --- Maps (Phase 4.5 — see docs/maps.md). Only the config layer for provider
-  // *selection*; MAP_MAX_RETRIES/MAP_CACHE_*/MAP_ENABLE_COMPARISON/
-  // MAP_FALLBACK_PROVIDER are MapService concerns (Phase 8+), not validated here yet. ---
+  // --- Maps (Phase 4.5 — see docs/maps.md). Phase 7 added provider selection;
+  // Phase 8 adds retry/fallback config. MAP_CACHE_*/MAP_ENABLE_COMPARISON are
+  // still unvalidated placeholders — later phases (cache, comparison mode). ---
   /** Active service provider. Invalid values fail startup — never silently fall back to another provider. */
   MAP_PROVIDER: z.enum(["neshan", "mapir", "google"]).default("neshan"),
+  /** Optional. Same enum as MAP_PROVIDER — an invalid value fails startup rather than silently picking a provider. Empty/unset = no fallback. */
+  MAP_FALLBACK_PROVIDER: z.union([z.enum(["neshan", "mapir", "google"]), z.literal("")]).default(""),
+  /** Extra attempts AFTER the first try (MapService), against the same provider, for retryable errors only. 0 = no retries. */
+  MAP_MAX_RETRIES: z.coerce.number().int().min(0).default(2),
   /** Per-provider server credentials. Each is required only once its provider is actually resolved (see maps/registry.ts) — an unused provider's missing key must not block startup. */
   NESHAN_API_KEY: z.string().min(1).optional(),
   MAPIR_API_KEY: z.string().min(1).optional(),
