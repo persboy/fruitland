@@ -38,7 +38,7 @@ Legacy یک سیستم آنلاین‌پرداخت کامل (ZarinPal) و کیف
 | مدل | هدف | مالک داده | چرخه‌ی عمر | کالکشن مستقل؟ |
 |---|---|---|---|---|
 | **User** | مشتری/ادمین/پیک با فیلد `role` | خودش | فعال ↔ غیرفعال | بله |
-| Address *(subdoc)* | آدرس‌های کاربر | User | ندارد | نه — Embedded در User |
+| Address *(subdoc)* | آدرس‌های کاربر (فیلدهای نرمال‌شده‌ی نقشه، Phase 4.5 مرحله‌ی ۱۰) | User | ندارد | نه — Embedded در User |
 | CourierProfile *(subdoc)* | وضعیت/وسیله‌ی پیک | User (role=courier) | آفلاین↔آنلاین↔مشغول | نه — Embedded در User |
 | **SystemState** | تعیین اتمیک اولین کاربر = MASTER_ADMIN | سیستم | Singleton | بله |
 | **Category** | دسته‌بندی محصول (قابل‌مدیریت در ادمین) | Admin | فعال↔غیرفعال، ترتیب | بله |
@@ -211,5 +211,24 @@ API قابل‌تغییر/تفویض نیست (طبق بخش ۱۷ Master Prompt)
 | پیاده‌سازی Schema واقعی | ✅ انجام شد — `app/src/lib/server/models/` |
 | تست‌های مدل | ✅ ۵۳ تست schema-validation (بدون DB) پاس؛ ⚠️ تست‌های یکپارچه‌ی واقعی (`test:integration`) نوشته شدند ولی به‌دلیل محدودیت شبکه‌ی sandbox اجرا نشدند — باید در dev/CI واقعی تأیید شوند |
 | Commit/Push | ✅ این کامیت |
+
+### ۸.۱ به‌روزرسانی Address (Maps Phase 4.5، مرحله‌ی ۱۰)
+
+`IAddress` (embedded در User، بدون تغییر ساختار کلی — طبق تصمیم ۵.۲ بالا) این فیلدها را گرفت:
+`district`, `neighborhood`, `street`, `alley`, `plaque`, `unit` (همه اختیاری، رشته‌ای)، `deliveryNotes` (اختیاری)،
+`resolvedBy: {provider, providerPlaceId, resolvedAt}` (اختیاری، فقط provenance — منطق کسب‌وکار هرگز آن را نمی‌خواند).
+
+`location` (قبلاً اختیاری `{lat,lng}`) به `{latitude,longitude}` تغییر نام داد (دقیقاً همان shape با `Coordinates`
+مشترک در `lib/server/maps`) **و اجباری شد** — طبق قانون صریح پرامپت نقشه «مختصات را همیشه ذخیره کن»؛ چون هنوز
+هیچ کدی سند Address نمی‌سازد، تغییر بی‌خطر بود. اعتبارسنجی بازه (±۹۰/±۱۸۰) در سطح Mongoose هم اضافه شد.
+
+**عمداً اضافه نشد (برای جلوگیری از ساختار موازی):**
+- `formattedAddress` جدا — همان `addressLine` موجود تنها متن نهایی و قابل‌ویرایش آدرس می‌ماند؛ `formattedAddress`
+  خروجی provider فقط برای پیش‌پرکردن اولیه‌ی `addressLine` در UI انتخاب‌گر استفاده می‌شود (فاز ۱۳ نقشه)، ذخیره نمی‌شود.
+- `title` جدا — همان `label` (enum `home/work/other`) موجود همین نقش را دارد.
+
+⚠️ **ناسازگاری کوچک شناخته‌شده (خارج از این فاز، دست نخورد):** `ICourierProfile.currentLocation` هنوز
+`{lat,lng}` قدیمی است، نه `{latitude,longitude}`. یکسان‌سازی آن به فاز Courier/Tracking موکول شد چون خارج از
+scope مدل Address بود (MASTER-PROMPT §۳۶: بدون تغییر بی‌ربط).
 
 **جزئیات کامل در `CLAUDE.md`.**

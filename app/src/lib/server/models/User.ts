@@ -2,10 +2,12 @@ import { Schema, Model, model, models, Types } from "mongoose";
 import {
   ADDRESS_LABELS,
   COURIER_STATUSES,
+  MAP_PROVIDER_NAMES,
   USER_ROLES,
   VEHICLE_TYPES,
   type AddressLabel,
   type CourierStatus,
+  type MapProviderName,
   type UserRole,
   type VehicleType,
 } from "@fruitland/shared";
@@ -37,6 +39,28 @@ const userSchemaOptions = {
  * (no granular permission system approved yet — role alone gates access).
  */
 
+/**
+ * Address is Provider-independent (Maps Phase 4.5 §12-13/§19-21): the
+ * structured components below come from whichever MapProvider resolved them
+ * (`resolvedBy`, provenance-only — business logic never reads it), but the
+ * schema itself is generic. Anything a provider could not resolve is
+ * genuinely absent, never guessed or copied from `addressLine`.
+ *
+ * `addressLine` (pre-existing) stays the ONE authoritative, user-facing full
+ * address text — the same field a courier reads and an order snapshots. A
+ * provider's `formattedAddress` is only ever used to *prefill* `addressLine`
+ * in the picker UI (map spec §32: auto-generated text must stay editable);
+ * it is not persisted separately, which would be a parallel/duplicate field.
+ * Likewise `label` (already existing) covers "home/work/other" — no separate
+ * free-text `title` was added on top of it.
+ *
+ * `location` (pre-existing, previously optional `{lat,lng}`) is renamed to
+ * `{latitude,longitude}` to exactly match the shared `Coordinates` shape used
+ * everywhere in `lib/server/maps` — an Address's location can be passed to
+ * MapService with no conversion. It is now REQUIRED (map spec §20: "always
+ * store coordinates, never just text"); safe to tighten now since no code yet
+ * creates Address documents.
+ */
 export interface IAddress {
   _id: Types.ObjectId;
   label: AddressLabel;
@@ -44,11 +68,30 @@ export interface IAddress {
   phone: string;
   province: string;
   city: string;
+  district?: string;
+  neighborhood?: string;
+  street?: string;
+  alley?: string;
+  plaque?: string;
+  unit?: string;
   addressLine: string;
   postalCode?: string;
-  location?: { lat: number; lng: number };
+  location: { latitude: number; longitude: number };
+  /** Free-text instructions for the courier (e.g. "زنگ همسایه را بزنید"), not part of the address itself. */
+  deliveryNotes?: string;
+  /** Provenance only (map spec §21) — which provider resolved this address, never used by business logic. Absent for manually-entered addresses. */
+  resolvedBy?: { provider: MapProviderName; providerPlaceId: string | null; resolvedAt: Date };
   isDefault: boolean;
 }
+
+const resolvedBySchema = new Schema(
+  {
+    provider: { type: String, enum: MAP_PROVIDER_NAMES, required: true },
+    providerPlaceId: { type: String, default: null },
+    resolvedAt: { type: Date, required: true },
+  },
+  { _id: false },
+);
 
 const addressSchema = new Schema<IAddress>(
   {
@@ -57,12 +100,26 @@ const addressSchema = new Schema<IAddress>(
     phone: { type: String, required: true, trim: true },
     province: { type: String, required: true, trim: true },
     city: { type: String, required: true, trim: true },
+    district: { type: String, trim: true },
+    neighborhood: { type: String, trim: true },
+    street: { type: String, trim: true },
+    alley: { type: String, trim: true },
+    plaque: { type: String, trim: true },
+    unit: { type: String, trim: true },
     addressLine: { type: String, required: true, trim: true },
     postalCode: { type: String, trim: true },
     location: {
-      type: new Schema({ lat: Number, lng: Number }, { _id: false }),
-      required: false,
+      type: new Schema(
+        {
+          latitude: { type: Number, required: true, min: -90, max: 90 },
+          longitude: { type: Number, required: true, min: -180, max: 180 },
+        },
+        { _id: false },
+      ),
+      required: true,
     },
+    deliveryNotes: { type: String, trim: true },
+    resolvedBy: { type: resolvedBySchema, default: undefined },
     isDefault: { type: Boolean, default: false },
   },
   { _id: true },

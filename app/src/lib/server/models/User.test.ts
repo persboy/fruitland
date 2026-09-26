@@ -22,7 +22,54 @@ describe("User schema", () => {
     expect(doc.validateSync()).toBeUndefined();
   });
 
-  it("accepts a valid embedded address", () => {
+  it("accepts a valid embedded address (province/city/district/neighborhood/street + required location)", () => {
+    const doc = new User({
+      phone: "09120000000",
+      addresses: [
+        {
+          recipientName: "Ali",
+          phone: "09120000000",
+          province: "Tehran",
+          city: "Tehran",
+          district: "منطقه ۵",
+          neighborhood: "صادقیه",
+          street: "آیت‌الله کاشانی",
+          alley: "۱۲",
+          plaque: "۴",
+          unit: "۲",
+          addressLine: "Valiasr St.",
+          deliveryNotes: "زنگ همسایه را بزنید",
+          location: { latitude: 35.719934, longitude: 51.340742 },
+        },
+      ],
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.addresses[0]?.label).toBe("home"); // default
+    expect(doc.addresses[0]?.district).toBe("منطقه ۵");
+  });
+
+  it("requires a location (coordinates are never optional — map spec §20)", () => {
+    const doc = new User({
+      phone: "09120000000",
+      addresses: [{ recipientName: "Ali", phone: "09120000000", province: "Tehran", city: "Tehran", addressLine: "Valiasr St." }],
+    });
+    const err = doc.validateSync();
+    expect(err?.errors["addresses.0.location"]).toBeDefined();
+  });
+
+  it.each([
+    [{ latitude: 91, longitude: 0 }],
+    [{ latitude: 0, longitude: 181 }],
+  ])("rejects out-of-range coordinates %j", (location) => {
+    const doc = new User({
+      phone: "09120000000",
+      addresses: [{ recipientName: "Ali", phone: "09120000000", province: "Tehran", city: "Tehran", addressLine: "Valiasr St.", location }],
+    });
+    const err = doc.validateSync();
+    expect(err?.errors["addresses.0.location.latitude"] ?? err?.errors["addresses.0.location.longitude"]).toBeDefined();
+  });
+
+  it("stores optional provider provenance (resolvedBy) without it being required", () => {
     const doc = new User({
       phone: "09120000000",
       addresses: [
@@ -32,11 +79,32 @@ describe("User schema", () => {
           province: "Tehran",
           city: "Tehran",
           addressLine: "Valiasr St.",
+          location: { latitude: 35.7, longitude: 51.3 },
+          resolvedBy: { provider: "neshan", providerPlaceId: null, resolvedAt: new Date("2026-01-01") },
         },
       ],
     });
     expect(doc.validateSync()).toBeUndefined();
-    expect(doc.addresses[0]?.label).toBe("home"); // default
+    expect(doc.addresses[0]?.resolvedBy?.provider).toBe("neshan");
+  });
+
+  it("rejects an unknown resolvedBy.provider", () => {
+    const doc = new User({
+      phone: "09120000000",
+      addresses: [
+        {
+          recipientName: "Ali",
+          phone: "09120000000",
+          province: "Tehran",
+          city: "Tehran",
+          addressLine: "Valiasr St.",
+          location: { latitude: 35.7, longitude: 51.3 },
+          resolvedBy: { provider: "bing", providerPlaceId: null, resolvedAt: new Date() },
+        },
+      ],
+    });
+    const err = doc.validateSync();
+    expect(err?.errors["addresses.0.resolvedBy.provider"]).toBeDefined();
   });
 
   it("rejects a courier profile with an invalid vehicle type", () => {

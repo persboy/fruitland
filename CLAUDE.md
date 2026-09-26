@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ (API Routes) کامل — یک تصمیم امنیتی (سطح دسترسی endpointها) باز و منتظر نظر کاربر است. بعدی پس از تأیید: مرحله‌ی ۱۰ نقشه (Address Model)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۰ (Address Model) کامل. بعدی پس از تأیید: مرحله‌ی ۱۱ نقشه (Address API — CRUD)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -239,7 +239,15 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    **Route Matrix:** طبق دستور صریح شما، expose شد چون MapService/Provider از قبل پشتیبانی می‌کنند، ولی هیچ Business logic هنوز آن را صدا نمی‌زند.
    **بدون تغییر (طبق مرز فاز):** rate limiting، cache، CORS سفارشی، رندر مرورگر، LocationPicker، Comparison Mode، اتصال به آدرس فروشگاه.
    **تست:** ۵۰ تست جدید (route-handler، اولین‌بار در پروژه با این الگو — `NextRequest` واقعی + mock کردن `createMapService`/`requireAuth`؛ همه‌ی ۹ کد خطا در `reverse-geocode` کامل پوشش داده شد، بقیه‌ی routeها سبک‌تر). smoke واقعی روی سرور production: درخواست بدون ورود قبل از رسیدن به هر provider با ۴۰۱ رد شد.
-11. تا ۱۷. Address، MapView/LocationPicker، AddressPicker، Routing (کسب‌وکاری)، Comparison، تست‌های یکپارچه‌ی باقی‌مانده، مستندات نهایی (`docs/maps.md`) — ⏳ شروع نشده.
+11. Address Model — ✅ پیاده‌سازی شد؛ منتظر تأیید. **بدون ساختار موازی**: همان `IAddress` embedded موجود در `User` (طبق تصمیم ۵.۲ `docs/domain-model.md`، بدون تغییر) گسترش یافت، نه یک مدل/کالکشن جدید:
+   - **فیلدهای نرمال‌شده‌ی جدید (اختیاری):** `district`, `neighborhood`, `street`, `alley`, `plaque`, `unit`, `deliveryNotes`.
+   - **Provenance (اختیاری):** `resolvedBy: {provider, providerPlaceId, resolvedAt}` — فقط اطلاعاتی، منطق کسب‌وکار هرگز به آن وابسته نیست.
+   - **`location`** از `{lat,lng}` اختیاری به `{latitude,longitude}` تغییر نام داد (دقیقاً هم‌شکل با `Coordinates` مشترک نقشه) **و اجباری شد** (طبق «مختصات را همیشه ذخیره کن»؛ بی‌خطر چون هنوز هیچ کدی Address نمی‌سازد) — با اعتبارسنجی بازه (±۹۰/±۱۸۰) در سطح Mongoose.
+   - **عمداً اضافه نشد:** `formattedAddress` جدا (همان `addressLine` موجود می‌ماند؛ خروجی provider فقط پیش‌پرکن UI است، فاز ۱۳)، `title` جدا (همان `label` موجود کافی است).
+   - **ناسازگاری کوچک شناخته‌شده، عمداً دست‌نخورده:** `ICourierProfile.currentLocation` هنوز `{lat,lng}` قدیمی است؛ یکسان‌سازی به فاز Courier موکول شد (خارج از scope این فاز).
+   جزئیات کامل استدلال در `docs/domain-model.md` §۸.۱.
+   **تست:** ۹ تست جدید/به‌روزشده در `User.test.ts` (آدرس معتبر با همه‌ی فیلدهای جدید، `location` اجباری، بازه‌ی نامعتبر lat/lng، `resolvedBy` معتبر/نامعتبر). `npm run verify` پاس؛ ۳۲۸ تست کل، هیچ تست قبلی خراب نشد.
+12. تا ۱۷. MapView/LocationPicker، AddressPicker، Routing (کسب‌وکاری، Address API)، Comparison، تست‌های یکپارچه‌ی باقی‌مانده، مستندات نهایی (`docs/maps.md`) — ⏳ شروع نشده.
 
 ### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
 
