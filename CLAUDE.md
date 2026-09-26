@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۸ (MapService — retry/fallback) کامل. بعدی پس از تأیید: مرحله‌ی ۹ نقشه (API routes)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ (API Routes) کامل — یک تصمیم امنیتی (سطح دسترسی endpointها) باز و منتظر نظر کاربر است. بعدی پس از تأیید: مرحله‌ی ۱۰ نقشه (Address Model)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -222,7 +222,24 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    **پیکربندی:** `MAP_FALLBACK_PROVIDER` حالا در `env.ts` است (همان enum سه‌گانه یا رشته‌ی خالی؛ مقدار نامعتبر = شکست واضح در بالا آمدن سرویس، هرگز انتخاب خاموش provider دیگر). `MAP_MAX_RETRIES` هم به schema اضافه شد (`min(0)`, پیش‌فرض ۲). **قانون مهم:** اگر fallback پیکربندی شده باشد ولی کلیدش نباشد، `createMapService()` **عمداً throw می‌کند** (خطای پیکربندی هرگز پشت رفتار fallback پنهان نمی‌شود) — این تفاوت آگاهانه با فاز ۷ است که در آن نبودِ کلید یک provider استفاده‌نشده مانع بالا آمدن نمی‌شد؛ اینجا چون کاربر صریحاً همان provider را به‌عنوان fallback خواسته، نبودنش پیکربندی خراب است.
    **بدون تغییر (طبق مرز فاز):** cache، rate limiting، API routes، رندر مرورگر، Comparison Mode — هیچ‌کدام لمس نشدند.
    **تست:** ۳۶ تست جدید — تمام سناریوهای فهرست‌شده‌ی کاربر (۳ کد قابل‌retry، RATE_LIMIT قابل/غیرقابل، ۵ کد بدون retry، سقف retry، `MAP_MAX_RETRIES=0`، خطای غیر-MapProviderError بدون retry، ۳ کد fallback-eligible، ۳ کد بدون fallback، fallback هم‌نام primary، fallback بدون قابلیت، شکست fallback، retry روی fallback، و ۸ تست `createMapService` با env واقعی).
-10. تا ۱۷. API، Address، MapView/LocationPicker، AddressPicker، Routing، Comparison، تست‌ها، مستندات — ⏳ شروع نشده.
+10. API Routes — ✅ پیاده‌سازی شد؛ منتظر تأیید. زیر `app/src/app/api/v1/maps/`، دقیقاً طبق کانونشن Next.js App Router موجود پروژه (نه Express):
+
+   | Route | Method | ورودی | خروجی موفق |
+   |---|---|---|---|
+   | `/api/v1/maps/reverse-geocode` | GET | query: `lat`, `lng`, `provider?` | `ReverseGeocodeResult` |
+   | `/api/v1/maps/geocode` | GET | query: `address`, `provider?` | `GeocodeResult[]` |
+   | `/api/v1/maps/search` | GET | query: `query`, `lat?`, `lng?` (هر دو یا هیچ‌کدام)، `limit?` (۱-۲۰)، `provider?` | `PlaceResult[]` |
+   | `/api/v1/maps/route` | POST | body: `{origin, destination, provider?, vehicleType?, includeGeometry?}` | `RouteResult` |
+   | `/api/v1/maps/route-matrix` | POST | body: `{origins[] (≤۲۵), destinations[] (≤۲۵), provider?}` | `RouteMatrixResult` |
+
+   **معماری:** `Route Handler → createMapService({provider}) → Registry → MapProvider → Neshan/Map.ir/Google`. هیچ route handler مستقیم provider نمی‌سازد، retry/fallback ندارد و پاسخ خام provider را برنمی‌گرداند — فقط نوع‌های مشترک domain (نه ساختار Neshan/Map.ir/Google) در پاسخ هستند، دقیقاً طبق envelope موجود پروژه (`apiSuccess`/`apiErrorFromException`).
+   **اعتبارسنجی:** `maps/apiSchemas.ts` (Zod؛ از `coordinatesSchema`/`routeRequestSchema`/`VEHICLE_TYPES`/`MAP_PROVIDER_NAMES` مشترک استفاده می‌کند، دوباره تعریف نمی‌کند). GET با `validation/parseQuery.ts` (کمکی جدید و عمومی، هم‌الگو با `parseJsonBody` موجود؛ query-stringها با `z.coerce`/transform به عدد تبدیل می‌شوند). خطاها همان `AppError.badRequest("...", "VALIDATION_ERROR")` موجودند.
+   **نگاشت خطا:** `maps/apiError.ts` → `translateMapError()`، یک جدول ثابت `MapErrorCode → {status, code فارسی}`: `INVALID_REQUEST/UNSUPPORTED_OPERATION`→۴۰۰، `NO_RESULT`→۴۰۴، `RATE_LIMIT`→۴۲۹، `AUTH_FAILED/NETWORK/INVALID_RESPONSE/PROVIDER_UNAVAILABLE`→۵۰۲ (مشکل ما/upstream است، نه کاربر — عمداً نه ۴۰۱/۴۰۳)، `TIMEOUT`→۵۰۴. پیام فارسی پاسخ **همیشه از یک جدول ثابت** است، هرگز `err.message` واقعی provider (که می‌تواند جزئیات داخلی داشته باشد) به کلاینت نمی‌رسد — تست شده. خطای غیر-`MapProviderError` دست‌نخورده به `apiErrorFromException` می‌رود (۵۰۰ عمومی، بدون افشا؛ رفتار از قبل موجود پروژه).
+   ⚠️ **تصمیم امنیتی که هنوز باز است (طبق دستور شما گزارش می‌شود، حدس زده نشد):** پروژه هنوز مشخص نکرده این endpointها باید عمومی باشند یا محدود به نقش خاص. چون این APIها منابع پولی (Google/Neshan/Map.ir) را صدا می‌زنند و «هیچ درخواست غیرضروری نباید برود» (اصل صریح پرامپت نقشه)، به‌عنوان پیش‌فرض محافظه‌کارانه `requireAuth` (هر کاربر واردشده، بدون محدودیت نقش) گذاشتم — نه public، نه فقط-admin. این باید توسط شما تأیید یا اصلاح شود (مثلاً محدود به customer/admin/courier مشخص).
+   **Route Matrix:** طبق دستور صریح شما، expose شد چون MapService/Provider از قبل پشتیبانی می‌کنند، ولی هیچ Business logic هنوز آن را صدا نمی‌زند.
+   **بدون تغییر (طبق مرز فاز):** rate limiting، cache، CORS سفارشی، رندر مرورگر، LocationPicker، Comparison Mode، اتصال به آدرس فروشگاه.
+   **تست:** ۵۰ تست جدید (route-handler، اولین‌بار در پروژه با این الگو — `NextRequest` واقعی + mock کردن `createMapService`/`requireAuth`؛ همه‌ی ۹ کد خطا در `reverse-geocode` کامل پوشش داده شد، بقیه‌ی routeها سبک‌تر). smoke واقعی روی سرور production: درخواست بدون ورود قبل از رسیدن به هر provider با ۴۰۱ رد شد.
+11. تا ۱۷. Address، MapView/LocationPicker، AddressPicker، Routing (کسب‌وکاری)، Comparison، تست‌های یکپارچه‌ی باقی‌مانده، مستندات نهایی (`docs/maps.md`) — ⏳ شروع نشده.
 
 ### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
 
