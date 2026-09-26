@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۰ (Address Model) کامل. بعدی پس از تأیید: مرحله‌ی ۱۱ نقشه (Address API — CRUD)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۰ تأیید شد. مرحله‌ی ۱۱ (Address API) کامل. بعدی پس از تأیید: مرحله‌ی ۱۲ نقشه (MapView/LocationPicker)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -247,7 +247,21 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    - **ناسازگاری کوچک شناخته‌شده، عمداً دست‌نخورده:** `ICourierProfile.currentLocation` هنوز `{lat,lng}` قدیمی است؛ یکسان‌سازی به فاز Courier موکول شد (خارج از scope این فاز).
    جزئیات کامل استدلال در `docs/domain-model.md` §۸.۱.
    **تست:** ۹ تست جدید/به‌روزشده در `User.test.ts` (آدرس معتبر با همه‌ی فیلدهای جدید، `location` اجباری، بازه‌ی نامعتبر lat/lng، `resolvedBy` معتبر/نامعتبر). `npm run verify` پاس؛ ۳۲۸ تست کل، هیچ تست قبلی خراب نشد.
-12. تا ۱۷. MapView/LocationPicker، AddressPicker، Routing (کسب‌وکاری، Address API)، Comparison، تست‌های یکپارچه‌ی باقی‌مانده، مستندات نهایی (`docs/maps.md`) — ⏳ شروع نشده.
+12. Address API — ✅ پیاده‌سازی شد؛ منتظر تأیید. زیر `/api/v1/addresses` (بدون مدل/کالکشن جدا؛ روی همان `User.addresses` embedded):
+
+   | Route | Method |
+   |---|---|
+   | `/api/v1/addresses` | GET (فهرست)، POST (ساخت) |
+   | `/api/v1/addresses/[id]` | GET، PATCH (partial)، DELETE |
+   | `/api/v1/addresses/[id]/default` | POST (پیش‌فرض‌کردن) |
+
+   **امنیت/مالکیت:** همه‌جا `requireAuth` و `userId` فقط از نشست (هرگز از body/param). ownership با یک کوئری واحد `{_id:userId, "addresses._id":id}` enforced می‌شود؛ آدرس کاربر دیگر و آدرس ناموجود هر دو دقیقاً همان ۴۰۴ `ADDRESS_NOT_FOUND` می‌گیرند — هیچ افشایی از وجود/عدم‌وجود آدرس کاربر دیگر نیست.
+   **اعتبارسنجی:** `validation/addressSchemas.ts` — از `coordinatesSchema`/`ADDRESS_LABELS` مشترک استفاده می‌کند، دوباره تعریف نکرد. `updateAddressSchema` = `createAddressSchema.partial()`.
+   **تصمیم `resolvedBy` (سؤال صریح این فاز):** هرگز از کلاینت پذیرفته نمی‌شود (نه در schema، نه در service) — قابل‌جعل بود. هر آدرس ساخته‌شده از این API امروز `resolvedBy: null` دارد؛ اتصال واقعی به فاز ۱۳ موکول شد (جزئیات استدلال در `docs/domain-model.md` §۸.۲).
+   **پیش‌فرض:** فقط «حداکثر یک پیش‌فرض» تضمین شد (نه «همیشه حداقل یک»، تا قانون کسب‌وکاری اختراع نشود). با دو نوشتار متوالی (unset همه → set هدف)، نه تراکنش (Address مالی نیست)؛ عملیات جدا `POST .../default` هم اضافه شد.
+   **تست:** ۲۹ تست جدید — ۲۱ تست route-handler (همان الگوی Phase 9؛ عدم‌احراز روی هر ۶ endpoint، اعتبارسنجی، عدم‌درز `userId`/`resolvedBy` کلاینت، خطای غیرمنتظره → ۵۰۰ عمومی) که در `npm run verify` پاس شدند، + ۸ تست یکپارچه‌ی DB واقعی در `addressService.integration.test.ts` (CRUD کامل، across-user 404، id نامعتبر/ناموجود، مختصات نامعتبر، همه‌ی مسیرهای تغییر پیش‌فرض) که مثل فازهای قبلی به‌دلیل محدودیت شبکه‌ی sandbox اجرا نشدند — باید در dev/CI واقعی تأیید شوند.
+   **Verification:** `npm run verify` پاس (۳۴۹ تست، lint، typecheck، build). Smoke واقعی روی سرور production: هر ۶ endpoint بدون ورود ۴۰۱ دادند، قبل از هر اتصال DB.
+13. تا ۱۷. MapView/LocationPicker، AddressPicker، Routing (کسب‌وکاری)، Comparison، تست‌های یکپارچه‌ی باقی‌مانده، مستندات نهایی (`docs/maps.md`) — ⏳ شروع نشده.
 
 ### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
 
