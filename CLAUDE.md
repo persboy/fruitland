@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۰ تأیید شد. مرحله‌ی ۱۱ (Address API) کامل. بعدی پس از تأیید: مرحله‌ی ۱۲ نقشه (MapView/LocationPicker)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۱ تأیید شد. مرحله‌ی ۱۲ (MapView/LocationPicker frontend) کامل. بعدی پس از تأیید: اتصال به یک صفحه‌ی واقعی + رندر برندشده (تصمیم معلق)
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -261,7 +261,25 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
    **پیش‌فرض:** فقط «حداکثر یک پیش‌فرض» تضمین شد (نه «همیشه حداقل یک»، تا قانون کسب‌وکاری اختراع نشود). با دو نوشتار متوالی (unset همه → set هدف)، نه تراکنش (Address مالی نیست)؛ عملیات جدا `POST .../default` هم اضافه شد.
    **تست:** ۲۹ تست جدید — ۲۱ تست route-handler (همان الگوی Phase 9؛ عدم‌احراز روی هر ۶ endpoint، اعتبارسنجی، عدم‌درز `userId`/`resolvedBy` کلاینت، خطای غیرمنتظره → ۵۰۰ عمومی) که در `npm run verify` پاس شدند، + ۸ تست یکپارچه‌ی DB واقعی در `addressService.integration.test.ts` (CRUD کامل، across-user 404، id نامعتبر/ناموجود، مختصات نامعتبر، همه‌ی مسیرهای تغییر پیش‌فرض) که مثل فازهای قبلی به‌دلیل محدودیت شبکه‌ی sandbox اجرا نشدند — باید در dev/CI واقعی تأیید شوند.
    **Verification:** `npm run verify` پاس (۳۴۹ تست، lint، typecheck، build). Smoke واقعی روی سرور production: هر ۶ endpoint بدون ورود ۴۰۱ دادند، قبل از هر اتصال DB.
-13. تا ۱۷. MapView/LocationPicker، AddressPicker، Routing (کسب‌وکاری)، Comparison، تست‌های یکپارچه‌ی باقی‌مانده، مستندات نهایی (`docs/maps.md`) — ⏳ شروع نشده.
+13. MapView / LocationPicker (Frontend) — ✅ پیاده‌سازی شد؛ منتظر تأیید. **قبل از کد**، فرانت‌اند موجود بررسی شد: هیچ کامپوننت نقشه/آدرس، هیچ `mapApi`/`addressApi` کلاینت، و هیچ صفحه‌ی account/address‌ای وجود نداشت (storefront هنوز فقط یک layout خالی دارد). `apiFetch` موجود (`lib/client/apiClient.ts`)، UI primitives (`Button/Card/Skeleton/StateMessage`) و الگوی فرم‌های admin (تست‌شده در فاز ۲) عیناً reuse شدند؛ چیزی دوباره ساخته نشد.
+
+   **معماری:**
+   - **`components/map/MapRenderer.ts`** — interface `{center, marker, onMapClick, className}`؛ دقیقاً همان seam که در فاز ۴.۵ (بررسی معماری Rendering-vs-Service) برای `MapRenderingProvider` آینده وعده داده شده بود، نه یک انتزاع دوم.
+   - **`components/map/LeafletMapRenderer.tsx`** — پیاده‌سازی واقعی این فاز: **Leaflet + کاشی‌های OpenStreetMap** (بدون کلید، همیشه در دسترس). ⚠️ **این هنوز رندر برندشده‌ی Neshan/Map.ir/Google نیست** — همان تصمیم معلق فاز ۴.۵ («کدام credential برای رندر») هنوز باز است و اینجا حل نشد؛ فقط یک لایه‌ی تعاملی واقعی و تست‌شده جایگزین آن شد تا LocationPicker امروز کار کند. سرویس‌های نقشه (جستجو، reverse-geocode) همچنان از API داخلی واقعی (Neshan/Map.ir/Google پشت `MapService`) می‌آیند — فقط پس‌زمینه‌ی بصری نقشه OSM است.
+   - **`components/map/MapView.tsx`** — پوسته‌ی provider-agnostic؛ رندرکننده را با `React.lazy` + `Suspense` (حالت loading) + `MapErrorBoundary` (حالت خطای بارگذاری) بارگذاری می‌کند؛ `renderer` prop برای تست/جایگزینی آینده. هیچ منطق آدرس در آن نیست.
+   - **`components/map/LocationPicker.tsx`** — جریان کامل: نقشه + جستجو (debounce ۴۰۰ms + AbortController) + موقعیت فعلی (`useCurrentLocation`) + reverse-geocode + `AddressForm`. حالت‌ها: `idle → resolving → ready/resolve-error`؛ ذخیره با `saving`/`saveError` جدا. حالت خطای reverse-geocode پین را از دست نمی‌دهد (فرم دستی همچنان باز است).
+   - **`components/address/AddressForm.tsx`** — فرم خالص، بدون آگاهی از نقشه یا API؛ فقط فیلدهای واقعی `IAddress`.
+   - **`lib/client/mapApi.ts` / `lib/client/addressApi.ts`** — wrapperهای نازک روی `apiFetch` (نه یک httpClient دوم). `addressApi.ts` نوع‌های `AddressDto`/`CreateAddressInput`/`UpdateAddressInput` را با `import type` مستقیم از سرور می‌گیرد (type-only، حجم بسته صفر) — تعریف دوباره نشد.
+   - **`hooks/useDebouncedValue.ts` / `hooks/useCurrentLocation.ts`** — جدید، عمومی (اولین پوشه‌ی `hooks/` سطح بالا؛ قبلاً hookها کنار کامپوننت بودند).
+
+   **`resolvedBy` (تصمیم صریح این فاز):** فرانت‌اند هرگز آن را در payload نمی‌گذارد — دقیقاً همان تصمیم فاز ۱۱ ادامه پیدا کرد، چیزی جدید حل نشد چون خارج از scope این فاز بود. پس هر آدرسی که از این جریان ساخته شود همچنان `resolvedBy: null` دارد.
+
+   **بدون صفحه‌ی میزبان (تصمیم عمدی scope):** هیچ صفحه‌ی `/account/addresses/...` ساخته نشد — طبق متن صریح این فاز («اگر UI انتخاب آدرس وجود ندارد، حداقل UI reusable لازم را بساز؛ ویژگی‌های نامرتبط checkout/مدیریت‌آدرس در این فاز نه») و چون storefront/account هنوز هیچ auth gate یا layout ندارد (ساختن آن یک feature جدا است، نه بخشی از MapView/LocationPicker). این کامپوننت‌ها reusable و تست‌شده تحویل داده شدند تا فاز بعدی (یا هر فازی که account/checkout را می‌سازد) مستقیم مصرفشان کند.
+
+   **تست (۲۹ تست جدید، همه در `npm run verify` پاس شدند):** `MapView` (۵: renderer تزریقی، مختصات اولیه، بدون marker، کلیک، شکست بارگذاری renderer با `MapErrorBoundary` واقعی)، `LocationPicker` (۱۲: حالت اولیه، انتخاب نقطه→reverse-geocode، شکست reverse-geocode بدون از دست دادن پین، جستجو+انتخاب نتیجه، شکست جستجو، جستجوی خالی بدون فراخوانی API، ویرایش قبل از ذخیره، **ساخت بدون `userId`/`resolvedBy`**، ویرایش آدرس موجود با PATCH — همین تست یک باگ واقعی پیدا کرد: فرم در حالت edit تا کلیک مجدد نقشه نمایش داده نمی‌شد، رفع شد —، شکست ذخیره، دکمه‌ی انصراف)، `AddressForm` (۴)، هوک‌ها (۵)، `mapApi`/`addressApi` (۴)، و **یک تست معماری ایستا** (`provider-independence.test.ts`) که کد واقعی (نه کامنت) هیچ کامپوننت UI را برای نام یک provider اسکن می‌کند و import مستقیم از `lib/server/maps/providers` را ممنوع می‌کند.
+
+   **Verification:** `npm run verify` پاس (۳۸۴ تست کل، lint، typecheck، build). **Smoke واقعی روی مرورگر انجام نشد** (sandbox بدون مرورگر، مثل همه‌ی فازهای قبلی) و چون صفحه‌ی میزبانی هم ساخته نشد، چیز جدیدی برای curl-smoke هم وجود نداشت؛ تأیید این فاز فقط از طریق تست‌های jsdom/RTL بالا و build موفق (خروجی build نشان می‌دهد این کامپوننت‌ها به هیچ صفحه‌ای امروز متصل نیستند، طبق تصمیم عمدی بالا).
+14. تا ۱۷. AddressPicker (اتصال به یک صفحه‌ی واقعی)، Routing (کسب‌وکاری)، Comparison، رندر برندشده‌ی Neshan/Map.ir/Google (تصمیم معلق فاز ۴.۵)، تست‌های یکپارچه‌ی DB باقی‌مانده، مستندات نهایی (`docs/maps.md`) — ⏳ شروع نشده.
 
 ### تصمیم معماری: Rendering Provider جدا از Service (Map) Provider
 
