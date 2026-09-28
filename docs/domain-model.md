@@ -47,6 +47,7 @@ Legacy یک سیستم آنلاین‌پرداخت کامل (ZarinPal) و کیف
 | **Order** | سفارش مشتری/تلفنی | User (customer) | preparing→shipped→delivered/cancelled/returned | بله |
 | OrderItem *(subdoc)* | آیتم سفارش (Snapshot قیمت/نام) | Order | ندارد | نه — Embedded |
 | OrderDelivery *(subdoc)* | تخصیص/تحویل پیک | Order | assigned→pickedUp→resolved | نه — Embedded |
+| **DeliveryRun** *(Phase 14)* | دسته/مسیر یک پیک شامل چند سفارش (stopهای مرتب) | Admin/Courier | draft→active→completed/cancelled | بله — جدا از `Order.delivery`؛ جزئیات در CLAUDE.md |
 | **OrderCounter** | شمارنده‌ی اتمیک شماره‌ی سفارش | سیستم | Singleton | بله |
 | **DiscountCode** | کد تخفیف عمومی/شخصی | Admin | فعال↔غیرفعال، مصرف‌شده | بله |
 | **Review** | نظر مشتری روی محصولِ سفارشِ تحویل‌شده | User | ثابت پس از ثبت | بله |

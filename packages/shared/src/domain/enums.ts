@@ -42,6 +42,19 @@ export type OrderDeliveryStatus = (typeof ORDER_DELIVERY_STATUSES)[number];
 export const ORDER_DELIVERY_PROPOSED_OUTCOMES = ["delivered", "returned"] as const;
 export type OrderDeliveryProposedOutcome = (typeof ORDER_DELIVERY_PROPOSED_OUTCOMES)[number];
 
+/**
+ * DeliveryRun = one courier's batch of orders (Phase 14). NOT a second
+ * per-order delivery lifecycle — that stays `ORDER_DELIVERY_STATUSES` on
+ * `Order.delivery`. "draft" = being assembled by an admin; "active" = the
+ * courier may work through the stops.
+ */
+export const DELIVERY_RUN_STATUSES = ["draft", "active", "completed", "cancelled"] as const;
+export type DeliveryRunStatus = (typeof DELIVERY_RUN_STATUSES)[number];
+
+/** There is deliberately no "next"/"in_progress": the current stop is derived (see getCurrentStop). */
+export const DELIVERY_STOP_STATUSES = ["pending", "delivered", "failed", "skipped"] as const;
+export type DeliveryStopStatus = (typeof DELIVERY_STOP_STATUSES)[number];
+
 export const DISCOUNT_TYPES = ["public", "personal"] as const;
 export type DiscountType = (typeof DISCOUNT_TYPES)[number];
 
