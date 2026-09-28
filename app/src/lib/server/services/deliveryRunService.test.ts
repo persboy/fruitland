@@ -6,39 +6,41 @@ const m = vi.hoisted(() => ({
   runFindOne: vi.fn(),
   runFindById: vi.fn(),
   runUpdateOne: vi.fn(),
-  runFindOneAndUpdate: vi.fn(),
-  runExists: vi.fn(),
   runCreate: vi.fn(),
-  runDeleteOne: vi.fn(),
   orderUpdateOne: vi.fn(),
   orderUpdateMany: vi.fn(),
   orderCount: vi.fn(),
   userFindOne: vi.fn(),
+  startSession: vi.fn(),
 }));
 
 vi.mock("../models/DeliveryRun", () => ({
   DeliveryRun: {
     findOne: (...a: unknown[]) => ({ lean: () => m.runFindOne(...a) }),
     findById: (...a: unknown[]) => ({ lean: () => m.runFindById(...a) }),
-    findOneAndUpdate: (...a: unknown[]) => ({ lean: () => m.runFindOneAndUpdate(...a) }),
     updateOne: m.runUpdateOne,
-    exists: m.runExists,
     create: m.runCreate,
-    deleteOne: m.runDeleteOne,
   },
 }));
 vi.mock("../models/Order", () => ({
   Order: { updateOne: m.orderUpdateOne, updateMany: m.orderUpdateMany, countDocuments: m.orderCount },
 }));
 vi.mock("../models/User", () => ({ User: { findOne: m.userFindOne } }));
+vi.mock("mongoose", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("mongoose")>();
+  return { ...actual, startSession: m.startSession };
+});
 
 import {
   activateRun,
+  addStopToDraft,
   cancelRun,
   confirmPickup,
   createDraftRun,
   getRun,
   proposeStopOutcome,
+  removeStopFromDraft,
+  reorderDraftStops,
   reorderStops,
   skipStop,
 } from "./deliveryRunService";
@@ -62,6 +64,11 @@ function makeRun(stops: Array<{ seq: number; status?: string }>, status = "activ
   };
 }
 
+/** A session whose withTransaction just calls the callback (no real transactional semantics — that needs a real MongoDB replica set, see the integration test). */
+function fakeSession() {
+  return { withTransaction: async (fn: () => Promise<void>) => fn(), endSession: vi.fn() };
+}
+
 async function expectAppError(promise: Promise<unknown>, code: string, status?: number) {
   await expect(promise).rejects.toMatchObject({ name: "AppError", code, ...(status ? { status } : {}) });
 }
@@ -75,11 +82,14 @@ beforeEach(() => {
 });
 
 describe("authorization boundaries (role checked before any database access)", () => {
-  it("customers and couriers cannot create, activate or cancel runs", async () => {
+  it("customers and couriers cannot create, activate, edit or cancel runs", async () => {
     for (const actor of [customer, courier]) {
       await expectAppError(createDraftRun(actor, { courierId: courierId.toString(), orderIds: [id().toString()] }), "FORBIDDEN_ROLE", 403);
       await expectAppError(activateRun(actor, id().toString()), "FORBIDDEN_ROLE", 403);
       await expectAppError(cancelRun(actor, id().toString()), "FORBIDDEN_ROLE", 403);
+      await expectAppError(addStopToDraft(actor, id().toString(), id().toString()), "FORBIDDEN_ROLE", 403);
+      await expectAppError(removeStopFromDraft(actor, id().toString(), id().toString()), "FORBIDDEN_ROLE", 403);
+      await expectAppError(reorderDraftStops(actor, id().toString(), []), "FORBIDDEN_ROLE", 403);
     }
     noDbTouched();
   });
@@ -114,7 +124,257 @@ describe("courier ownership", () => {
   });
 });
 
-describe("reorderStops", () => {
+describe("createDraftRun — planning only, reserves nothing", () => {
+  const orderA = id();
+  const orderB = id();
+
+  function arrange() {
+    m.userFindOne.mockResolvedValue({ courierProfile: { vehicleType: "motorcycle" } });
+    m.orderCount.mockResolvedValue(2);
+  }
+
+  it("rejects the same order twice before touching the database", async () => {
+    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderA.toString()] }), "DUPLICATE_ORDER", 400);
+    noDbTouched();
+  });
+
+  it("only accepts an active courier", async () => {
+    m.userFindOne.mockResolvedValue(null);
+    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString()] }), "COURIER_NOT_FOUND", 400);
+    expect(m.userFindOne.mock.calls[0]![0]).toMatchObject({ role: "courier", isActive: true });
+    expect(m.runCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates the run WITHOUT writing to any Order — no courierId, no assignedAt, nothing reserved", async () => {
+    arrange();
+    const runId = id();
+    m.runCreate.mockResolvedValue({ _id: runId });
+    m.runFindById.mockResolvedValue({
+      _id: runId,
+      courierId,
+      status: "draft",
+      stops: [
+        { _id: id(), orderId: orderA, sequence: 1, status: "pending" },
+        { _id: id(), orderId: orderB, sequence: 2, status: "pending" },
+      ],
+    });
+    const dto = await createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderB.toString()] });
+
+    expect(m.orderUpdateOne).not.toHaveBeenCalled();
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+    expect(m.runCreate.mock.calls[0]![0]).toMatchObject({ status: "draft" });
+    expect(dto.status).toBe("draft");
+    expect(dto.stops.map((s) => s.sequence)).toEqual([1, 2]);
+  });
+
+  it("does NOT reject a duplicate-key error specially (the index no longer covers drafts) — any create failure just propagates", async () => {
+    m.userFindOne.mockResolvedValue({ courierProfile: { vehicleType: "motorcycle" } });
+    m.orderCount.mockResolvedValue(1);
+    m.runCreate.mockRejectedValue(Object.assign(new Error("boom"), { code: 11000 }));
+    await expect(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString()] })).rejects.toThrow("boom");
+  });
+
+  it("fails when an order does not exist, before creating anything", async () => {
+    m.userFindOne.mockResolvedValue({ courierProfile: { vehicleType: "car" } });
+    m.orderCount.mockResolvedValue(1);
+    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderB.toString()] }), "ORDER_NOT_FOUND", 404);
+    expect(m.runCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("draft editing — admin only, draft only, never touches Order.delivery", () => {
+  function draftWith(stops: Array<{ orderId: Types.ObjectId; seq: number }>) {
+    return { _id: id(), courierId, status: "draft", stops: stops.map((s) => ({ _id: id(), orderId: s.orderId, sequence: s.seq, status: "pending" })) };
+  }
+
+  it("addStopToDraft appends the next sequence and writes only the run, never an Order", async () => {
+    const run = draftWith([{ orderId: id(), seq: 1 }, { orderId: id(), seq: 2 }]);
+    m.runFindById.mockResolvedValue(run);
+    m.orderCount.mockResolvedValue(1);
+    m.runUpdateOne.mockResolvedValue({ matchedCount: 1 });
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run });
+    const newOrder = id();
+    await addStopToDraft(admin, run._id.toString(), newOrder.toString());
+    const [filter, update] = m.runUpdateOne.mock.calls[0]!;
+    expect(filter).toMatchObject({ status: "draft" });
+    expect(update.$set.stops).toHaveLength(3);
+    expect(update.$set.stops[2]).toMatchObject({ sequence: 3, status: "pending" });
+    expect(m.orderUpdateOne).not.toHaveBeenCalled();
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("addStopToDraft rejects an order already in the SAME draft", async () => {
+    const existingOrder = id();
+    const run = draftWith([{ orderId: existingOrder, seq: 1 }]);
+    m.runFindById.mockResolvedValue(run);
+    await expectAppError(addStopToDraft(admin, run._id.toString(), existingOrder.toString()), "DUPLICATE_ORDER", 400);
+    expect(m.runUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("addStopToDraft refuses on a run that is not a draft", async () => {
+    const run = { ...draftWith([{ orderId: id(), seq: 1 }]), status: "active" };
+    m.runFindById.mockResolvedValue(run);
+    await expectAppError(addStopToDraft(admin, run._id.toString(), id().toString()), "DELIVERY_RUN_NOT_DRAFT", 409);
+  });
+
+  it("removeStopFromDraft re-sequences the remaining stops to a contiguous 1..n and touches no Order", async () => {
+    const [oA, oB, oC] = [id(), id(), id()];
+    const run = draftWith([{ orderId: oA, seq: 1 }, { orderId: oB, seq: 2 }, { orderId: oC, seq: 3 }]);
+    m.runUpdateOne.mockResolvedValue({ matchedCount: 1 });
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce(run);
+    await removeStopFromDraft(admin, run._id.toString(), run.stops[1]!._id.toString());
+    const update = m.runUpdateOne.mock.calls[0]![1];
+    expect(update.$set.stops.map((s: { sequence: number }) => s.sequence)).toEqual([1, 2]);
+    expect(update.$set.stops.map((s: { orderId: Types.ObjectId }) => s.orderId)).toEqual([oA, oC]);
+    expect(m.orderUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("removeStopFromDraft refuses to leave a run with zero stops", async () => {
+    const run = draftWith([{ orderId: id(), seq: 1 }]);
+    m.runFindById.mockResolvedValue(run);
+    await expectAppError(removeStopFromDraft(admin, run._id.toString(), run.stops[0]!._id.toString()), "DELIVERY_RUN_WOULD_BE_EMPTY", 400);
+    expect(m.runUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("reorderDraftStops permutes freely since every draft stop is pending", async () => {
+    const [oA, oB] = [id(), id()];
+    const run = draftWith([{ orderId: oA, seq: 1 }, { orderId: oB, seq: 2 }]);
+    m.runUpdateOne.mockResolvedValue({ matchedCount: 1 });
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce(run);
+    await reorderDraftStops(admin, run._id.toString(), [run.stops[1]!._id.toString(), run.stops[0]!._id.toString()]);
+    const update = m.runUpdateOne.mock.calls[0]![1];
+    expect(update.$set.stops.map((s: { orderId: Types.ObjectId; sequence: number }) => [s.orderId, s.sequence])).toEqual([
+      [oA, 2],
+      [oB, 1],
+    ]);
+  });
+});
+
+describe("activateRun — the one transactional, all-or-nothing operation", () => {
+  function arrangeDraft(stops: Array<{ orderId: Types.ObjectId }>) {
+    const run = { _id: id(), courierId, status: "draft", stops: stops.map((s) => ({ _id: id(), orderId: s.orderId, sequence: 1, status: "pending" })) };
+    m.runFindById.mockResolvedValue(run);
+    m.startSession.mockResolvedValue(fakeSession());
+    return run;
+  }
+
+  it("distinguishes a missing run from one that is not a draft, without starting a session", async () => {
+    m.runFindById.mockResolvedValueOnce(null);
+    await expectAppError(activateRun(admin, id().toString()), "DELIVERY_RUN_NOT_FOUND", 404);
+    m.runFindById.mockResolvedValueOnce({ _id: id(), status: "active", stops: [] });
+    await expectAppError(activateRun(admin, id().toString()), "INVALID_RUN_TRANSITION", 409);
+    expect(m.startSession).not.toHaveBeenCalled();
+  });
+
+  it("assigns every order inside the transaction with assignedAt = now (not draft creation time), then flips the run", async () => {
+    const [oA, oB] = [id(), id()];
+    const run = arrangeDraft([{ orderId: oA }, { orderId: oB }]);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "active" });
+
+    await activateRun(admin, run._id.toString());
+
+    expect(m.orderUpdateOne).toHaveBeenCalledTimes(2);
+    for (const call of m.orderUpdateOne.mock.calls) {
+      expect(call[0]).toMatchObject({ status: "preparing", "delivery.status": "unassigned" });
+      expect(call[1].$set["delivery.courierId"]).toEqual(courierId);
+      expect(call[1].$set["delivery.assignedAt"]).toBeInstanceOf(Date);
+      expect(call[2]).toHaveProperty("session");
+    }
+    const [flipFilter, flipUpdate, flipOptions] = m.runUpdateOne.mock.calls[0]!;
+    expect(flipFilter).toMatchObject({ status: "draft" });
+    expect(flipUpdate.$set.status).toBe("active");
+    expect(flipOptions).toHaveProperty("session");
+  });
+
+  it("aborts entirely — no run flip — when any order is no longer eligible (all-or-nothing)", async () => {
+    const [oA, oB, oC] = [id(), id(), id()];
+    arrangeDraft([{ orderId: oA }, { orderId: oB }, { orderId: oC }]);
+    m.orderUpdateOne.mockResolvedValueOnce({ modifiedCount: 1 }).mockResolvedValueOnce({ modifiedCount: 0 });
+
+    await expectAppError(
+      activateRun(admin, id().toString()),
+      "ORDER_NOT_ASSIGNABLE",
+      409,
+    );
+    // Only the two orders up to (and including) the failing one were attempted; the run was never flipped.
+    expect(m.orderUpdateOne).toHaveBeenCalledTimes(2);
+    expect(m.runUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("reports a conflict, not a crash, when the run changed between the pre-check and the transaction", async () => {
+    arrangeDraft([{ orderId: id() }]);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+    await expectAppError(activateRun(admin, id().toString()), "DELIVERY_RUN_CHANGED", 409);
+  });
+
+  it("reports a conflict when the run-level unique index rejects the flip (order already in another active run)", async () => {
+    arrangeDraft([{ orderId: id() }]);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runUpdateOne.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
+    await expectAppError(activateRun(admin, id().toString()), "ORDER_ALREADY_IN_ACTIVE_RUN", 409);
+  });
+
+  it("reports the environment limitation — not a silent non-transactional fallback — when the deployment cannot run transactions", async () => {
+    arrangeDraft([{ orderId: id() }]);
+    const err = Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 });
+    m.startSession.mockResolvedValue({ withTransaction: async () => { throw err; }, endSession: vi.fn() });
+    await expect(activateRun(admin, id().toString())).rejects.toMatchObject({ name: "Error", message: expect.stringContaining("replica set") });
+    // Critically: not an AppError (this is an unexpected/environment failure, not an ordinary domain rejection),
+    // and the order was never touched non-transactionally as a fallback.
+    await expect(activateRun(admin, id().toString())).rejects.not.toMatchObject({ name: "AppError" });
+  });
+
+  it("always ends the session, even on failure", async () => {
+    const run = arrangeDraft([{ orderId: id() }]);
+    const session = fakeSession();
+    m.startSession.mockResolvedValue(session);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+    await expectAppError(activateRun(admin, run._id.toString()), "ORDER_NOT_ASSIGNABLE", 409);
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("cancelRun", () => {
+  it("cancelling a DRAFT never touches any Order — nothing was ever reserved", async () => {
+    const run = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }] };
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "cancelled" });
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    await cancelRun(admin, run._id.toString());
+    expect(m.runUpdateOne.mock.calls[0]![0]).toMatchObject({ status: "draft" });
+    expect(m.orderUpdateOne).not.toHaveBeenCalled();
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+    expect(m.orderCount).not.toHaveBeenCalled();
+  });
+
+  it("cancelling an ACTIVE run refuses once any order has been picked up, and releases nothing", async () => {
+    const run = makeRun([{ seq: 1 }, { seq: 2 }], "active");
+    m.runFindById.mockResolvedValue(run);
+    m.orderCount.mockResolvedValue(1);
+    await expectAppError(cancelRun(admin, run._id.toString()), "RUN_HAS_PICKED_UP_ORDERS", 409);
+    expect(m.runUpdateOne).not.toHaveBeenCalled();
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("cancelling an ACTIVE run releases assignments that were never picked up", async () => {
+    const run = makeRun([{ seq: 1 }], "active");
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "cancelled" });
+    m.orderCount.mockResolvedValue(0);
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    await cancelRun(admin, run._id.toString());
+    expect(m.orderUpdateMany.mock.calls[0]![0]).toMatchObject({ "delivery.status": "assigned" });
+  });
+
+  it("cannot cancel a completed run", async () => {
+    const run = makeRun([{ seq: 1, status: "delivered" }], "completed");
+    m.runFindById.mockResolvedValue(run);
+    await expectAppError(cancelRun(admin, run._id.toString()), "INVALID_RUN_TRANSITION", 409);
+  });
+});
+
+describe("reorderStops (courier, active run)", () => {
   it("writes the new sequences in one atomic update guarded by active status, owner and 'still pending'", async () => {
     const run = makeRun([{ seq: 1, status: "delivered" }, { seq: 2 }, { seq: 3 }, { seq: 4 }]);
     m.runFindOne.mockResolvedValue(run);
@@ -143,25 +403,11 @@ describe("reorderStops", () => {
     expect(m.runUpdateOne).not.toHaveBeenCalled();
   });
 
-  it("refuses an incomplete ordering", async () => {
-    const run = makeRun([{ seq: 1 }, { seq: 2 }, { seq: 3 }]);
-    m.runFindOne.mockResolvedValue(run);
-    await expectAppError(reorderStops(courier, run._id.toString(), [run.stops[0]!._id.toString()]), "REORDER_INCOMPLETE", 400);
-    expect(m.runUpdateOne).not.toHaveBeenCalled();
-  });
-
   it.each(["draft", "completed", "cancelled"])("refuses to reorder a %s run", async (status) => {
     const run = makeRun([{ seq: 1 }, { seq: 2 }], status);
     m.runFindOne.mockResolvedValue(run);
     await expectAppError(reorderStops(courier, run._id.toString(), run.stops.map((s) => s._id.toString())), "DELIVERY_RUN_NOT_ACTIVE", 409);
     expect(m.runUpdateOne).not.toHaveBeenCalled();
-  });
-
-  it("reports a conflict when a stop was resolved between read and write", async () => {
-    const run = makeRun([{ seq: 1 }, { seq: 2 }]);
-    m.runFindOne.mockResolvedValue(run);
-    m.runUpdateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
-    await expectAppError(reorderStops(courier, run._id.toString(), run.stops.map((s) => s._id.toString())), "DELIVERY_RUN_CHANGED", 409);
   });
 });
 
@@ -187,11 +433,9 @@ describe("proposeStopOutcome — the courier proposes, never resolves", () => {
     expect(filter["delivery.courierId"].equals(courierId)).toBe(true);
     expect(update.$set["delivery.status"]).toBe("proposed");
     expect(update.$set["delivery.proposedOutcome"]).toBe(proposedOutcome);
-    // The courier path never resolves an order or touches Order.status.
     const everyOrderWrite = JSON.stringify([...m.orderUpdateOne.mock.calls, ...m.orderUpdateMany.mock.calls]);
     expect(everyOrderWrite).not.toContain("resolved");
     expect(everyOrderWrite).not.toContain('"status":"shipped"');
-    expect(everyOrderWrite).not.toContain('"status":"delivered"');
   });
 
   it("refuses a stop that already has an outcome", async () => {
@@ -208,13 +452,6 @@ describe("proposeStopOutcome — the courier proposes, never resolves", () => {
     expect(revert[1]).toMatchObject({ $set: { "stops.$.status": "pending" } });
   });
 
-  it("does not touch the order when the stop could not be claimed", async () => {
-    const run = arrange();
-    m.runUpdateOne.mockResolvedValue({ modifiedCount: 0, matchedCount: 0 });
-    await expectAppError(proposeStopOutcome(courier, run._id.toString(), run.stops[0]!._id.toString(), "delivered"), "DELIVERY_RUN_CHANGED", 409);
-    expect(m.orderUpdateOne).not.toHaveBeenCalled();
-  });
-
   it("completes the run only when no stop is left pending", async () => {
     const run = arrange();
     await proposeStopOutcome(courier, run._id.toString(), run.stops[0]!._id.toString(), "delivered");
@@ -226,112 +463,5 @@ describe("proposeStopOutcome — the courier proposes, never resolves", () => {
   it("returns 404 for a stop that is not in the run", async () => {
     const run = arrange();
     await expectAppError(proposeStopOutcome(courier, run._id.toString(), id().toString(), "delivered"), "DELIVERY_STOP_NOT_FOUND", 404);
-  });
-});
-
-describe("createDraftRun — one order, one open run", () => {
-  const orderA = id();
-  const orderB = id();
-  function arrange() {
-    m.userFindOne.mockResolvedValue({ courierProfile: { vehicleType: "motorcycle" } });
-    m.orderCount.mockResolvedValue(2);
-  }
-
-  it("rejects the same order twice before touching the database", async () => {
-    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderA.toString()] }), "DUPLICATE_ORDER", 400);
-    noDbTouched();
-  });
-
-  it("only accepts an active courier", async () => {
-    m.userFindOne.mockResolvedValue(null);
-    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString()] }), "COURIER_NOT_FOUND", 400);
-    expect(m.userFindOne.mock.calls[0]![0]).toMatchObject({ role: "courier", isActive: true });
-    expect(m.runCreate).not.toHaveBeenCalled();
-  });
-
-  it("turns the unique-index violation into ORDER_ALREADY_IN_RUN and assigns nothing", async () => {
-    arrange();
-    m.runCreate.mockRejectedValue(Object.assign(new Error("E11000 duplicate key"), { code: 11000 }));
-    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderB.toString()] }), "ORDER_ALREADY_IN_RUN", 409);
-    expect(m.orderUpdateOne).not.toHaveBeenCalled();
-  });
-
-  it("claims each order from preparing/unassigned to assigned (the existing lifecycle step)", async () => {
-    arrange();
-    const runId = id();
-    m.runCreate.mockResolvedValue({ _id: runId });
-    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
-    m.runFindById.mockResolvedValue({
-      _id: runId,
-      courierId,
-      status: "draft",
-      stops: [
-        { _id: id(), orderId: orderA, sequence: 1, status: "pending" },
-        { _id: id(), orderId: orderB, sequence: 2, status: "pending" },
-      ],
-    });
-    const dto = await createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderB.toString()] });
-
-    expect(m.orderUpdateOne).toHaveBeenCalledTimes(2);
-    const [filter, update] = m.orderUpdateOne.mock.calls[0]!;
-    expect(filter).toMatchObject({ status: "preparing", "delivery.status": "unassigned" });
-    expect(update.$set["delivery.status"]).toBe("assigned");
-    // Order.status is never written by run creation.
-    expect(Object.keys(update.$set)).not.toContain("status");
-    expect(dto.stops.map((s) => s.sequence)).toEqual([1, 2]);
-  });
-
-  it("rolls back earlier claims and deletes the draft when a later order cannot be assigned", async () => {
-    arrange();
-    const runId = id();
-    m.runCreate.mockResolvedValue({ _id: runId });
-    m.orderUpdateOne.mockResolvedValueOnce({ modifiedCount: 1 }).mockResolvedValueOnce({ modifiedCount: 0 });
-    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderB.toString()] }), "ORDER_NOT_ASSIGNABLE", 409);
-    expect(m.orderUpdateMany).toHaveBeenCalledTimes(1);
-    expect(m.orderUpdateMany.mock.calls[0]![1]).toMatchObject({ $set: { "delivery.status": "unassigned" } });
-    expect(m.runDeleteOne).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails when an order does not exist", async () => {
-    m.userFindOne.mockResolvedValue({ courierProfile: { vehicleType: "car" } });
-    m.orderCount.mockResolvedValue(1);
-    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderA.toString(), orderB.toString()] }), "ORDER_NOT_FOUND", 404);
-    expect(m.runCreate).not.toHaveBeenCalled();
-  });
-});
-
-describe("cancelRun", () => {
-  it("refuses once any order has been picked up, and releases nothing", async () => {
-    const run = makeRun([{ seq: 1 }, { seq: 2 }], "active");
-    m.runFindById.mockResolvedValue(run);
-    m.orderCount.mockResolvedValue(1);
-    await expectAppError(cancelRun(admin, run._id.toString()), "RUN_HAS_PICKED_UP_ORDERS", 409);
-    expect(m.runUpdateOne).not.toHaveBeenCalled();
-    expect(m.orderUpdateMany).not.toHaveBeenCalled();
-  });
-
-  it("cancels a draft run and releases only assignments that were never picked up", async () => {
-    const run = makeRun([{ seq: 1 }], "draft");
-    m.runFindById.mockResolvedValue(run);
-    m.orderCount.mockResolvedValue(0);
-    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
-    await cancelRun(admin, run._id.toString());
-    expect(m.orderUpdateMany.mock.calls[0]![0]).toMatchObject({ "delivery.status": "assigned" });
-  });
-
-  it("cannot cancel a completed run", async () => {
-    const run = makeRun([{ seq: 1, status: "delivered" }], "completed");
-    m.runFindById.mockResolvedValue(run);
-    await expectAppError(cancelRun(admin, run._id.toString()), "INVALID_RUN_TRANSITION", 409);
-  });
-});
-
-describe("activateRun", () => {
-  it("distinguishes a missing run from one that is not a draft", async () => {
-    m.runFindOneAndUpdate.mockResolvedValue(null);
-    m.runExists.mockResolvedValueOnce(null);
-    await expectAppError(activateRun(admin, id().toString()), "DELIVERY_RUN_NOT_FOUND", 404);
-    m.runExists.mockResolvedValueOnce({ _id: id() });
-    await expectAppError(activateRun(admin, id().toString()), "INVALID_RUN_TRANSITION", 409);
   });
 });

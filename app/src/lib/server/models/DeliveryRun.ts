@@ -2,7 +2,7 @@ import { Schema, Model, model, models, Types } from "mongoose";
 import {
   DELIVERY_RUN_STATUSES,
   DELIVERY_STOP_STATUSES,
-  OPEN_DELIVERY_RUN_STATUSES,
+  RESERVING_DELIVERY_RUN_STATUS,
   validateStopSet,
   type DeliveryRunStatus,
   type DeliveryStopStatus,
@@ -76,16 +76,21 @@ const deliveryRunSchema = new Schema<IDeliveryRun>(
 deliveryRunSchema.index({ courierId: 1, status: 1 });
 
 /**
- * THE one-order-one-open-run invariant, enforced by the database: an order
- * may appear in at most one draft/active run. Completed/cancelled runs are
- * outside the partial filter, so history keeps its order references, and
- * this same index serves order → run lookup. (`$in` inside a partial filter
- * requires MongoDB >= 6.0.) A unique multikey index does not stop the same
- * order appearing twice inside ONE run — validateStopSet covers that.
+ * THE order-reservation invariant, enforced by the database — but ONLY for
+ * "active" runs (Phase 14 Decision Review, Decision 1 = Option B, approved):
+ * a DRAFT reserves nothing, so the same order may appear in several drafts
+ * at once. Only once a run is activated (`activateRun`, inside a MongoDB
+ * transaction — see services/deliveryRunService.ts) does an order become
+ * unavailable to any other run. This is a plain equality filter (not
+ * `$in`), so — unlike the draft-or-active version this replaced — it
+ * carries no MongoDB >= 6.0 requirement; partial indexes with a simple
+ * equality predicate have worked since partial indexes were introduced.
+ * A unique multikey index does not stop the same order appearing twice
+ * inside ONE run — validateStopSet covers that.
  */
 deliveryRunSchema.index(
   { "stops.orderId": 1 },
-  { unique: true, partialFilterExpression: { status: { $in: [...OPEN_DELIVERY_RUN_STATUSES] } } },
+  { unique: true, partialFilterExpression: { status: RESERVING_DELIVERY_RUN_STATUS } },
 );
 
 export const DeliveryRun =

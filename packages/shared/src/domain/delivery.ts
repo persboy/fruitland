@@ -44,15 +44,28 @@ export function canTransitionDeliveryRun(from: DeliveryRunStatus, to: DeliveryRu
 }
 
 /**
- * A run "holds" its orders while draft or active: an order may be in at most
- * one such run (enforced by a partial unique index on the model). Completed
- * and cancelled runs keep their order references as history.
+ * Not yet terminal — still cancellable. This is NOT about order reservation
+ * (see RESERVING_DELIVERY_RUN_STATUS below); "draft" is on this list purely
+ * because a draft can still be cancelled/discarded.
  */
 export const OPEN_DELIVERY_RUN_STATUSES = ["draft", "active"] as const satisfies readonly DeliveryRunStatus[];
 
 export function isOpenDeliveryRunStatus(status: DeliveryRunStatus): boolean {
   return (OPEN_DELIVERY_RUN_STATUSES as readonly string[]).includes(status);
 }
+
+/**
+ * Decision (approved after Phase 14 Decision Review, Decision 1 = Option B):
+ * a "draft" is planning only and reserves nothing — the SAME order may sit
+ * in several draft runs at once. An order is reserved against other runs
+ * only once a run reaches "active" (i.e. only once `activateRun` has
+ * atomically claimed it — see services/deliveryRunService.ts). The
+ * model's partial unique index on `stops.orderId` is filtered to exactly
+ * this one status, deliberately as a plain equality filter (no `$in`), so
+ * it does not carry the `$in`-in-partialFilterExpression MongoDB >= 6.0
+ * requirement the old draft-or-active version did.
+ */
+export const RESERVING_DELIVERY_RUN_STATUS: DeliveryRunStatus = "active";
 
 // ---------------------------------------------------------------- DeliveryStop status
 

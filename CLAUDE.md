@@ -327,6 +327,19 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **تأییدنشده:** تست‌های یکپارچه با MongoDB واقعی (`deliveryRunService.integration.test.ts`، شامل index جزئی یکتا) نوشته شدند ولی در این sandbox اجرا نشدند؛ رفتار partial index و مسیرهای اتمیک فقط با mock/`validateSync` تست شده‌اند. **باید در dev/CI با `npm run test:integration` تأیید شوند.**
 - **هشدار زیرساخت:** `npm test` ریشه فقط workspace `app` را اجرا می‌کند؛ تست‌های `packages/shared` داخل `verify` نیستند. تست‌های قوانین Phase 14 عمداً داخل `app` نوشته شدند تا در `verify` اجرا شوند.
 
+#### به‌روزرسانی Phase 14 — Decision Review، Decision 1 (تأییدشده): Option B
+
+**draft فقط برنامه‌ریزی است و هیچ‌چیزی رزرو نمی‌کند.** این جایگزین رفتار اولیه‌ی Phase 14 (که draft بلافاصله سفارش را assign می‌کرد) شد.
+
+- **ساخت/ویرایش draft** (`createDraftRun`, `addStopToDraft`, `removeStopFromDraft`, `reorderDraftStops`، همه admin-only): **هرگز** `Order.delivery` را نمی‌نویسند. همان سفارش می‌تواند هم‌زمان در چند draft باشد. حذف stop، بقیه را به `۱..n` پیوسته resequence می‌کند؛ حذف آخرین stop رد می‌شود («ماموریت لغو کنید»). ویرایش draft فقط سند run را می‌نویسد.
+- **`activateRun` تنها جایی است که سفارش واقعاً assign می‌شود** (`Order.delivery.status=assigned`, `courierId`, `assignedAt = زمان activate`، نه زمان ساخت draft). این عملیات all-or-nothing روی همه‌ی stopهای run است و با **تراکنش واقعی MongoDB** (`mongoose.startSession()` + `session.withTransaction`) پیاده شده — تنها استفاده‌ی transaction در این فایل، چون این تنها عملیاتی است که به «همه یا هیچ» روی چند سند نیاز دارد.
+  - **⚠️ محدودیت محیط:** تراکنش نیاز به replica set/mongos دارد. `mongod` مستقل (پیش‌فرض محلی `MONGODB_URI` در `.env.example`، و `MongoMemoryServer` استاندالون‌ای که بقیه‌ی تست‌های یکپارچه استفاده می‌کنند) از تراکنش پشتیبانی نمی‌کند. در این حالت `activateRun` **fallback خاموش به نوشتن غیرتراکنشی نمی‌زند** — عمداً یک `Error` معمولی (نه `AppError`) پرتاب می‌کند تا به‌عنوان باگ/۵۰۰ ثبت شود، طبق طبقه‌بندی مستند در `errors/AppError.ts`. برای اجرای واقعی `activateRun`، MongoDB باید replica set باشد؛ Atlas همیشه همین‌طور است، محیط dev محلی باید تنظیم شود.
+  - تست یکپارچه‌ی `activateRun` به همین دلیل از هلپر جدید `models/testDbReplSet.ts` (`MongoMemoryReplSet`, تک‌نود) استفاده می‌کند، جدا از `testDb.ts` استاندالون بقیه‌ی تست‌ها.
+- **Index تغییر کرد:** `partialFilterExpression` از `{status:{$in:[draft,active]}}` به `{status:"active"}` (فقط یک برابری ساده، بدون `$in`) تغییر کرد — این هم معنی جدید را درست کد می‌کند و هم نیازمندی MongoDB ≥ 6.0 قبلی را (که فقط برای `$in` در partial filter بود) حذف می‌کند. ثابت مربوطه: `RESERVING_DELIVERY_RUN_STATUS = "active"` در `packages/shared/src/domain/delivery.ts`.
+- **`cancelRun` دو مسیر جدا دارد:** لغو یک `draft` هیچ `Order` ای را نمی‌خواند یا نمی‌نویسد (چیزی رزرو نشده بود). لغو یک `active` run دقیقاً همان رفتار قبلی (رد اگر هر سفارشی pickup شده باشد، سپس آزادسازی) را دارد.
+- **حل‌شده از فهرست تصمیم‌های باز قبلی:** یک سفارش می‌تواند هم‌زمان در چند draft باشد (تأییدشده)؛ فقط یک run فعال می‌تواند سفارش را داشته باشد؛ activate all-or-nothing است.
+- **همچنان باز (خارج از Decision 1، در مرور کلی گزارش شد):** معنی `picked_up`/`confirmPickup`، مالک `Order.status=shipped`، سرنوشت لغو run بعد از pickup، معنی `skipped`، سقف تعداد run فعال هر پیک، دروازه‌ی availability پیک آفلاین، و race بین `confirmPickup` و `cancelRun` — هیچ‌کدام در این تغییر دست نخورده‌اند.
+
 ### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
 
 `RouteOptions.vehicleType?: VehicleType` (از enum مشترک `car|motorcycle|bicycle`) به رابط `RoutingProvider` اضافه شد. Business logic هیچ مقداری را ثابت نمی‌فرستد. `NeshanProvider.getRoute` این را به `type=car` یا `type=motorcycle` نگاشت می‌کند (Neshan بایسیکل ندارد → `bicycle` باعث `UNSUPPORTED_OPERATION` می‌شود، نه fallback خاموش). اگر caller چیزی ندهد، پیش‌فرض adapter (نه Business logic) اعمال می‌شود — برای Neshan `car`.

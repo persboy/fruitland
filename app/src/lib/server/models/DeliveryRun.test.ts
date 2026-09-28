@@ -47,11 +47,11 @@ describe("DeliveryRun schema", () => {
     expect(bad.validateSync()).toBeDefined();
   });
 
-  it("declares the partial unique index that enforces one open run per order", () => {
+  it("declares the partial unique index that enforces one order per ACTIVE run (drafts reserve nothing — Decision Review Option B)", () => {
     const index = DeliveryRun.schema.indexes().find(([fields]) => "stops.orderId" in fields);
     expect(index).toBeDefined();
     const options = index?.[1];
-    expect(options).toMatchObject({ unique: true, partialFilterExpression: { status: { $in: ["draft", "active"] } } });
+    expect(options).toMatchObject({ unique: true, partialFilterExpression: { status: "active" } });
   });
 
   it("indexes a courier's runs by status", () => {
