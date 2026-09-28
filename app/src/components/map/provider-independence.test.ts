@@ -42,4 +42,33 @@ describe("UI provider-independence (static check)", () => {
       }
     }
   });
+
+  /**
+   * Phase 13: the same independence rule applies one layer up, to *rendering*
+   * providers. registry.ts is the one file allowed to name a concrete
+   * renderer (NeshanMapRenderer/GoogleMapsRenderer/LeafletMapRenderer) —
+   * MapView and LocationPicker must only ever go through it.
+   */
+  const CONCRETE_RENDERER_FILES = ["LeafletMapRenderer.tsx", "NeshanMapRenderer.tsx", "GoogleMapsRenderer.tsx"];
+
+  it.each(["MapView.tsx", "LocationPicker.tsx"])("%s never imports a concrete renderer module directly", (file) => {
+    const source = stripComments(readFileSync(join(__dirname, file), "utf-8"));
+    for (const rendererFile of CONCRETE_RENDERER_FILES) {
+      const moduleSpecifier = `./${rendererFile.replace(/\.tsx$/, "")}`;
+      expect(source).not.toContain(moduleSpecifier);
+    }
+  });
+
+  it("registry.ts is the only non-test file that imports concrete renderer modules", () => {
+    for (const file of readdirSync(__dirname)) {
+      const isSourceFile = file.endsWith(".tsx") || file.endsWith(".ts");
+      const isTestFile = file.includes(".test.");
+      if (file === "registry.ts" || !isSourceFile || isTestFile || CONCRETE_RENDERER_FILES.includes(file)) continue;
+      const source = stripComments(readFileSync(join(__dirname, file), "utf-8"));
+      for (const rendererFile of CONCRETE_RENDERER_FILES) {
+        const moduleSpecifier = `./${rendererFile.replace(/\.tsx$/, "")}`;
+        expect(source).not.toContain(moduleSpecifier);
+      }
+    }
+  });
 });

@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۱ تأیید شد. مرحله‌ی ۱۲ (MapView/LocationPicker frontend) کامل. بعدی پس از تأیید: اتصال به یک صفحه‌ی واقعی + رندر برندشده (تصمیم معلق)
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۱ تأیید شد. مرحله‌ی ۱۲ (MapView/LocationPicker frontend) کامل. مرحله‌ی ۱۳ (Map Rendering Provider: Neshan/Google/Leaflet) پیاده شد، منتظر تأیید. بعدی پس از تأیید: اتصال به یک صفحه‌ی واقعی
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -298,7 +298,16 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 **نتیجه:** سه Provider سه الگوی متفاوت دارند، پس **abstraction مشترک برای رندر هنوز زودهنگام است** تا وقتی مرحله‌ی رندر واقعاً برسد؛ فقط این تصمیم ثبت می‌شود که `MapRenderingProvider` به‌عنوان یک interface مستقل از `MapProvider` طراحی خواهد شد (نه `NeshanRenderer extends NeshanProvider` یا مشابه آن)، و انتخاب و اعتبارسنجی credential رندر هرکدام در فاز خودش انجام می‌شود — نه الان.
 
-**ENV — طبق دستور کاربر، فقط چیزی که نقش و نوعش روشن است در `.env.example` می‌ماند:** `NESHAN_API_KEY` همچنان فقط برای Web Service سمت سرور است. هیچ متغیر رندر (مثل یک `NESHAN_MAP_KEY` حدسی) اضافه نشد؛ آن‌وقتی که فاز رندر برسد، بر اساس نتیجه‌ی نهایی این‌جا تعیین می‌شود.
+**ENV:** (به‌روز در Phase 13) متغیرهای رندر مرورگر اکنون وجود دارند — بخش «Phase 13» پایین. `NESHAN_API_KEY`/`MAPIR_API_KEY`/`GOOGLE_MAPS_API_KEY` همچنان فقط سمت سرورند و هرگز به کد کلاینت نمی‌رسند.
+
+### Phase 13 — Map Rendering Provider (پیاده‌سازی شد؛ منتظر تأیید کاربر)
+
+- **دو abstraction مستقل:** `MapProvider` (سرور: geocode/search/route) و رندر مرورگر (`MapRendererComponent` در `components/map/MapRenderer.ts` — همان seam موجود تکامل داده شد، interface تکراری ساخته نشد).
+- **انتخاب renderer:** فقط `components/map/registry.ts` (`getDefaultMapRenderer()`) بر اساس `NEXT_PUBLIC_MAP_RENDER_PROVIDER` ∈ `leaflet|neshan|google` (پیش‌فرض `leaflet`؛ مقدار نامعتبر → خطا، نه fallback خاموش). `MapView`/`LocationPicker` هیچ نام providerی نمی‌دانند و renderer مشخص را import نمی‌کنند (تست معماری این را enforce می‌کند).
+- **Renderer‌های پیاده‌شده:** `LeafletMapRenderer` (OSM؛ **fallback/development رسمی**، حذف نشد)، `NeshanMapRenderer` (پکیج رسمی `@neshan-maps-platform/ol`)، `GoogleMapsRenderer` (`@googlemaps/js-api-loader` v2، `google.maps.Marker` کلاسیک تا Map ID اجباری نباشد). همگی SDK را فقط داخل `useEffect` با `import()` دینامیک بارگذاری می‌کنند (SSR-safe)؛ نبود کلید در render پرتاب می‌شود تا `MapErrorBoundary` بگیرد.
+- **Map.ir: عمداً پیاده نشد (deferred).** مستندات رسمیِ قابل‌راستی‌آزمایی برای قرارداد کلیک/مارکر/style پیدا نشد؛ مقدار `mapir` در enum رندر نامعتبر است. تا ارائه‌ی مستندات رسمی حدس زده نمی‌شود.
+- **Credentialها:** سرور‌فقط: `NESHAN_API_KEY`، `MAPIR_API_KEY`، `GOOGLE_MAPS_API_KEY`. مرورگر (`NEXT_PUBLIC_*`، در bundle دیده می‌شوند → باید در پنل provider به دامنه/referrer محدود شوند): `NEXT_PUBLIC_NESHAN_MAP_KEY` (نوع «نقشه وب»)، `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY`، اختیاری `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID`. اعتبارسنجی در `lib/client/mapRenderEnv.ts`.
+- **تأیید‌نشده:** رندر واقعی Neshan/Google با کلید واقعی و تست بصری در مرورگر انجام نشد (sandbox مرورگر/کلید ندارد)؛ تست‌ها با mock/بدون سرویس خارجی‌اند. هیچ صفحه‌ی میزبانی هنوز `MapView` را استفاده نمی‌کند، پس build آن را در bundle صفحه‌ای وارد نکرده است.
 
 ### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
 

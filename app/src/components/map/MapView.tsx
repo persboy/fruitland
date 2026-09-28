@@ -1,13 +1,19 @@
 "use client";
 
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
 import type { Coordinates } from "@fruitland/shared";
 import { Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { MapErrorBoundary } from "./MapErrorBoundary";
 import type { MapRendererComponent } from "./MapRenderer";
+import { getDefaultMapRenderer } from "./registry";
 
-const DefaultRenderer = lazy(() => import("./LeafletMapRenderer"));
+// Resolved once per module load (NEXT_PUBLIC_MAP_RENDER_PROVIDER is a
+// build-time-inlined value, not something that changes at runtime), exactly
+// like the single hardcoded `lazy(() => import("./LeafletMapRenderer"))`
+// this replaces — see registry.ts for how the provider is chosen and why
+// MapView itself never branches on a provider name.
+const DefaultRenderer = getDefaultMapRenderer();
 
 export interface MapViewProps {
   /** Where the map is centered. */
@@ -18,9 +24,12 @@ export interface MapViewProps {
   onMapClick?: (coordinates: Coordinates) => void;
   className?: string;
   /**
-   * Overrides the concrete renderer — used by tests, and the seam a future
-   * MapRenderingProvider (Neshan/Map.ir/Google branded tiles) plugs into.
-   * Defaults to the Leaflet/OpenStreetMap renderer (see LeafletMapRenderer.tsx).
+   * Overrides the concrete renderer — used by tests, and available to a
+   * caller that needs a specific renderer regardless of the configured
+   * default. Normal usage should not need this: the default comes from
+   * `registry.ts` / `NEXT_PUBLIC_MAP_RENDER_PROVIDER` (leaflet/neshan/google;
+   * Map.ir browser rendering is intentionally not implemented yet — see
+   * CLAUDE.md Phase 13).
    */
   renderer?: MapRendererComponent;
 }

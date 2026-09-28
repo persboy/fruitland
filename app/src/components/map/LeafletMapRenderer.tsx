@@ -5,16 +5,18 @@ import type { Map as LeafletMap, Marker as LeafletMarker } from "leaflet";
 import type { MapRendererProps } from "./MapRenderer";
 
 /**
- * Concrete renderer for THIS phase: Leaflet + OpenStreetMap raster tiles —
- * keyless and always available, so LocationPicker has a real, working map to
- * interact with today. This is NOT Neshan/Map.ir/Google branded tile
- * rendering; that is `MapRenderingProvider` work for a later, dedicated phase
- * (see CLAUDE.md). The map *services* used elsewhere in this component tree
- * (search, reverse-geocode) already go through the real internal API backed
- * by real providers — only this background layer is OSM for now.
+ * Leaflet + OpenStreetMap raster tiles — keyless and always available. As of
+ * Phase 13, this is the project's explicit fallback/development renderer
+ * (selected via `NEXT_PUBLIC_MAP_RENDER_PROVIDER=leaflet`, the default), NOT
+ * a stand-in that branded rendering (`NeshanMapRenderer`/`GoogleMapsRenderer`,
+ * see registry.ts) is meant to replace outright — a deployment without a
+ * configured browser map key still gets a real, working map. The map
+ * *services* used elsewhere in this component tree (search, reverse-geocode)
+ * already go through the real internal API backed by real providers —
+ * independent of which tile renderer is active (see CLAUDE.md Phase 4.5).
  *
- * Imported only via React.lazy({ssr:false} via MapView's Suspense boundary) —
- * Leaflet touches `window` at module scope and must never load during SSR.
+ * Imported only via React.lazy (MapView's Suspense boundary) — Leaflet
+ * touches `window` at module scope and must never load during SSR.
  */
 export default function LeafletMapRenderer({ center, marker, onMapClick, className }: MapRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
