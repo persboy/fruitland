@@ -107,6 +107,11 @@ shipped   → returned
 - `cancelled`: فقط از `preparing` مجاز است (سفارشِ درحال ارسال را نمی‌توان مستقیم کنسل کرد —
   این یک قانون کسب‌وکار حدس‌زده‌شده نیست، بلکه پیش‌فرض ایمن؛ **سؤال باز**، نگاه کنید بخش ۷).
 
+**Phase 14 Decision Review، Decision 3 (تأییدشده) — Option F:** مالکیت این چرخه هنوز به فاز رسمی Orders موکول است.
+- بند بالا («`shipped` فقط پس از `assignedAt`») یک **پیش‌شرط** (گارد) است، نه یک **trigger**. یعنی: بدون `assignedAt`، `shipped` ممکن نیست — ولی ست‌شدن `assignedAt` به‌خودی‌خود `Order.status` را به `shipped` تبدیل نمی‌کند.
+- **مالک، trigger دقیق، و بازیگر مجاز `Order.status`** (از جمله این‌که کدام رویداد — فعال‌سازی run، تحویل فیزیکی پیک، پیشنهاد پیک، یا تأیید نهایی ادمین — باعث `shipped` می‌شود) عمداً **حل نشده** و به فاز رسمی Orders (که هنوز پیاده نشده) موکول شده است.
+- در نتیجه: **`DeliveryRun` (فاز ۱۴) هیچ عملیاتی — `createDraftRun`, `addStopToDraft`, `removeStopFromDraft`, `reorderDraftStops`, `activateRun`, `confirmPickup`, `proposeStopOutcome`, `skipStop`, `cancelRun` — هرگز `Order.status` را نمی‌نویسد.** این دو زیرسیستم (`Order.status` و `Order.delivery`) مستقل باقی می‌مانند؛ هیچ همگام‌سازی ضمنی بین آن‌ها معرفی نشده است.
+
 ### Order.delivery (زیرسیستم مستقل از status)
 ```
 (خالی) → assignmentRequested → assigned → pickedUp → proposed(delivered|returned) → resolved

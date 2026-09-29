@@ -512,3 +512,133 @@ describe("proposeStopOutcome — the courier proposes, never resolves", () => {
     await expectAppError(proposeStopOutcome(courier, run._id.toString(), id().toString(), "delivered"), "DELIVERY_STOP_NOT_FOUND", 404);
   });
 });
+
+describe("Decision 3 (approved, Option F): DeliveryRun never mutates Order.status", () => {
+  /**
+   * `Order.status` ownership, its transitions (including "shipped"), and
+   * the trigger/actor for each are explicitly deferred to the official
+   * Orders phase — not decided here (Phase 14 Decision Review, Decision 3).
+   * `delivery.assignedAt` being set remains a documented PREREQUISITE for a
+   * future "shipped" transition, not a trigger this file is allowed to act
+   * on. Every write DeliveryRun makes to an Order must therefore touch only
+   * `delivery.*` — this one invariant is checked directly against every
+   * $set/$unset object across every Order.updateOne/updateMany call any
+   * DeliveryRun operation makes, rather than trusting each operation's own
+   * narrower assertions not to regress.
+   */
+  function assertNoOrderStatusWrites() {
+    const allCalls = [...m.orderUpdateOne.mock.calls, ...m.orderUpdateMany.mock.calls];
+    expect(allCalls.length).toBeGreaterThan(0); // a vacuous pass (no Order write at all) would not exercise this invariant
+    for (const call of allCalls) {
+      const update = call[1] as { $set?: Record<string, unknown>; $unset?: Record<string, unknown> };
+      for (const mutation of [update.$set, update.$unset]) {
+        if (!mutation) continue;
+        expect(Object.keys(mutation)).not.toContain("status");
+        for (const key of Object.keys(mutation)) {
+          expect(key === "status" || key.startsWith("delivery.")).toBe(true);
+        }
+      }
+    }
+  }
+
+  it("activateRun writes only delivery.* fields to each Order", async () => {
+    const run = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }] };
+    m.runFindById.mockResolvedValue(run);
+    m.startSession.mockResolvedValue(fakeSession());
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    await activateRun(admin, run._id.toString());
+    assertNoOrderStatusWrites();
+  });
+
+  it("confirmPickup writes only delivery.* fields to Order", async () => {
+    const run = makeRun([{ seq: 1 }]);
+    m.runFindOne.mockResolvedValue(run);
+    m.orderUpdateMany.mockResolvedValue({ modifiedCount: 1 });
+    await confirmPickup(courier, run._id.toString());
+    assertNoOrderStatusWrites();
+  });
+
+  it("proposeStopOutcome (delivered and failed) writes only delivery.* fields to Order", async () => {
+    for (const outcome of ["delivered", "failed"] as const) {
+      m.orderUpdateOne.mockClear();
+      m.orderUpdateMany.mockClear();
+      const run = makeRun([{ seq: 1 }]);
+      m.runFindOne.mockResolvedValue(run);
+      m.runUpdateOne.mockResolvedValue({ modifiedCount: 1, matchedCount: 1 });
+      m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      m.runFindById.mockResolvedValue(run);
+      await proposeStopOutcome(courier, run._id.toString(), run.stops[0]!._id.toString(), outcome);
+      assertNoOrderStatusWrites();
+    }
+  });
+
+  it("createDraftRun, addStopToDraft, removeStopFromDraft, reorderDraftStops and cancelRun (draft or active) never write to Order at all", async () => {
+    const scenarios: Array<() => Promise<unknown>> = [
+      async () => {
+        m.userFindOne.mockResolvedValue({ courierProfile: { vehicleType: "car" } });
+        m.orderCount.mockResolvedValue(1);
+        const runId = id();
+        m.runCreate.mockResolvedValue({ _id: runId });
+        m.runFindById.mockResolvedValue({ _id: runId, courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }] });
+        return createDraftRun(admin, { courierId: courierId.toString(), orderIds: [id().toString()] });
+      },
+      async () => {
+        const draft = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }] };
+        m.runFindById.mockResolvedValue(draft);
+        m.orderCount.mockResolvedValue(1);
+        m.runUpdateOne.mockResolvedValue({ matchedCount: 1 });
+        return addStopToDraft(admin, draft._id.toString(), id().toString());
+      },
+      async () => {
+        const draft = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }, { _id: id(), orderId: id(), sequence: 2, status: "pending" }] };
+        m.runFindById.mockResolvedValue(draft);
+        m.runUpdateOne.mockResolvedValue({ matchedCount: 1 });
+        return removeStopFromDraft(admin, draft._id.toString(), draft.stops[0]!._id.toString());
+      },
+      async () => {
+        const draft = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }, { _id: id(), orderId: id(), sequence: 2, status: "pending" }] };
+        m.runFindById.mockResolvedValue(draft);
+        m.runUpdateOne.mockResolvedValue({ matchedCount: 1 });
+        return reorderDraftStops(admin, draft._id.toString(), [draft.stops[1]!._id.toString(), draft.stops[0]!._id.toString()]);
+      },
+      async () => {
+        const draft = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }] };
+        m.runFindById.mockResolvedValue(draft);
+        m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+        return cancelRun(admin, draft._id.toString());
+      },
+      async () => {
+        const run = makeRun([{ seq: 1 }], "active");
+        m.runFindById.mockResolvedValue(run);
+        m.orderCount.mockResolvedValue(0);
+        m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+        return cancelRun(admin, run._id.toString());
+      },
+    ];
+    for (const run of scenarios) {
+      m.orderUpdateOne.mockClear();
+      m.orderUpdateMany.mockClear();
+      await run();
+      expect(m.orderUpdateOne).not.toHaveBeenCalled();
+      // cancelRun on an ACTIVE run does write to Order (releaseOrders) — but only delivery.* fields, never `status`.
+      for (const call of m.orderUpdateMany.mock.calls) {
+        const update = call[1] as { $set?: Record<string, unknown>; $unset?: Record<string, unknown> };
+        for (const mutation of [update.$set, update.$unset]) {
+          if (!mutation) continue;
+          for (const key of Object.keys(mutation)) expect(key.startsWith("delivery.")).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("skipStop never touches Order at all", async () => {
+    const run = makeRun([{ seq: 1 }]);
+    m.runFindOne.mockResolvedValue(run);
+    m.runFindById.mockResolvedValue(run);
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    await skipStop(courier, run._id.toString(), run.stops[0]!._id.toString());
+    expect(m.orderUpdateOne).not.toHaveBeenCalled();
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+});

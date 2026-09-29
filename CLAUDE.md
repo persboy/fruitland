@@ -348,7 +348,17 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **`picked_up`** = پیک فیزیکاً کالا را از فروشگاه/انبار تحویل گرفته؛ `pickedUpAt` (زمان واقعی تأیید، نه زمان تخصیص). در این فاز فقط ثبت می‌شود؛ مبنای هیچ گزارش/سنجش عملکردی نیست.
 - گذار `assigned→picked_up` همیشه با اقدام صریح پیک (`confirmPickup`) است — هرگز ضمنی از طریق `proposeStopOutcome`، reorder یا فعال‌سازی. `proposeStopOutcome` همچنان `picked_up` می‌خواهد، نه صرفاً `assigned`.
 - مستندات کامل‌تر در `docs/domain-model.md §4` و کامنت‌های `IOrderDelivery` (`Order.ts`) و `ORDER_DELIVERY_TRANSITIONS` (`packages/shared/src/domain/delivery.ts`).
-- **همچنان باز:** مالک `Order.status=shipped` (Decision 3)، لغو run بعد از pickup (Decision 6)، معنی `skipped`، سقف run فعال هر پیک، availability پیک آفلاین، race بین `confirmPickup` و `cancelRun`.
+- **همچنان باز:** مالک `Order.status=shipped` (Decision 3، حل‌شد — پایین)، لغو run بعد از pickup (Decision 6)، معنی `skipped`، سقف run فعال هر پیک، availability پیک آفلاین، race بین `confirmPickup` و `cancelRun`.
+
+#### به‌روزرسانی Phase 14 — Decision Review، Decision 3 (تأییدشده): مالکیت `Order.status` به فاز Orders موکول شد (Option F)
+
+**دلیل:** ماژول رسمی Orders (سرویس/API/چرخه‌ی ثبت-ویرایش-لغو سفارش) هنوز در ریپو پیاده نشده؛ تعیین trigger/بازیگر `Order.status` بدون آن حدسی خواهد بود.
+
+- **`DeliveryRun` هرگز `Order.status` را نمی‌نویسد** — نه در `createDraftRun`, `addStopToDraft`, `removeStopFromDraft`, `reorderDraftStops`, `activateRun`, `confirmPickup`, `proposeStopOutcome`, `skipStop`, و نه در `cancelRun`. این یک invariant صریح است و با یک تست اختصاصی (`deliveryRunService.test.ts`, describe «Decision 3») روی همه‌ی نوشتن‌های `Order` بررسی می‌شود: هر `$set`/`$unset` فقط می‌تواند فیلدهای `delivery.*` را داشته باشد.
+- **بند مستند «`shipped` فقط پس از `assignedAt`» یک گارد است، نه trigger.** یعنی بدون `assignedAt`، `shipped` ممکن نیست؛ اما ست‌شدن `assignedAt` خودکار `shipped` نمی‌سازد.
+- **عمداً حل‌نشده و به فاز Orders موکول شد:** مالک `Order.status`، trigger دقیق `shipped` (فعال‌سازی؟ pickup؟ پیشنهاد پیک؟)، بازیگر مجاز آن، trigger `shipped→returned` و `shipped→delivered`، و سیاست دقیق `cancelled`.
+- **هیچ ماشین‌حالتی برای `Order.status` اضافه نشد** (نه `ORDER_STATUS_TRANSITIONS`، نه actor جدید) — طبق تصمیم، این کار عمداً نیمه‌کاره پیاده نمی‌شود.
+- `Order.status` و `Order.delivery.status` دو زیرسیستم کاملاً مستقل باقی می‌مانند؛ هیچ همگام‌سازی ضمنی بین‌شان معرفی نشد.
 
 ### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
 
