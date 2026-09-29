@@ -338,7 +338,17 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **Index تغییر کرد:** `partialFilterExpression` از `{status:{$in:[draft,active]}}` به `{status:"active"}` (فقط یک برابری ساده، بدون `$in`) تغییر کرد — این هم معنی جدید را درست کد می‌کند و هم نیازمندی MongoDB ≥ 6.0 قبلی را (که فقط برای `$in` در partial filter بود) حذف می‌کند. ثابت مربوطه: `RESERVING_DELIVERY_RUN_STATUS = "active"` در `packages/shared/src/domain/delivery.ts`.
 - **`cancelRun` دو مسیر جدا دارد:** لغو یک `draft` هیچ `Order` ای را نمی‌خواند یا نمی‌نویسد (چیزی رزرو نشده بود). لغو یک `active` run دقیقاً همان رفتار قبلی (رد اگر هر سفارشی pickup شده باشد، سپس آزادسازی) را دارد.
 - **حل‌شده از فهرست تصمیم‌های باز قبلی:** یک سفارش می‌تواند هم‌زمان در چند draft باشد (تأییدشده)؛ فقط یک run فعال می‌تواند سفارش را داشته باشد؛ activate all-or-nothing است.
-- **همچنان باز (خارج از Decision 1، در مرور کلی گزارش شد):** معنی `picked_up`/`confirmPickup`، مالک `Order.status=shipped`، سرنوشت لغو run بعد از pickup، معنی `skipped`، سقف تعداد run فعال هر پیک، دروازه‌ی availability پیک آفلاین، و race بین `confirmPickup` و `cancelRun` — هیچ‌کدام در این تغییر دست نخورده‌اند.
+- **همچنان باز (خارج از Decision 1، در مرور کلی گزارش شد):** معنی `picked_up`/`confirmPickup` (حل‌شد — پایین)، مالک `Order.status=shipped`، سرنوشت لغو run بعد از pickup، معنی `skipped`، سقف تعداد run فعال هر پیک، دروازه‌ی availability پیک آفلاین، و race بین `confirmPickup` و `cancelRun` — هیچ‌کدام در این تغییر دست نخورده‌اند.
+
+#### به‌روزرسانی Phase 14 — Decision Review، Decision 2 (تأییدشده): معنای `picked_up`
+
+**`assigned` و `picked_up` دو رویداد جدا هستند، نه یک چیز با دو اسم.** رفتار کد همان چیزی ماند که بود (فقط مستندسازی روشن شد؛ هیچ گذار/enum/مجوزی تغییر نکرد):
+
+- **`assigned`** = تخصیص رسمی توسط فعال‌سازی ادمین (`activateRun`، Decision 1)؛ `assignedAt`. همان لحظه‌ای که «تأیید ادمین» در `[PI §8]` به آن اشاره دارد.
+- **`picked_up`** = پیک فیزیکاً کالا را از فروشگاه/انبار تحویل گرفته؛ `pickedUpAt` (زمان واقعی تأیید، نه زمان تخصیص). در این فاز فقط ثبت می‌شود؛ مبنای هیچ گزارش/سنجش عملکردی نیست.
+- گذار `assigned→picked_up` همیشه با اقدام صریح پیک (`confirmPickup`) است — هرگز ضمنی از طریق `proposeStopOutcome`، reorder یا فعال‌سازی. `proposeStopOutcome` همچنان `picked_up` می‌خواهد، نه صرفاً `assigned`.
+- مستندات کامل‌تر در `docs/domain-model.md §4` و کامنت‌های `IOrderDelivery` (`Order.ts`) و `ORDER_DELIVERY_TRANSITIONS` (`packages/shared/src/domain/delivery.ts`).
+- **همچنان باز:** مالک `Order.status=shipped` (Decision 3)، لغو run بعد از pickup (Decision 6)، معنی `skipped`، سقف run فعال هر پیک، availability پیک آفلاین، race بین `confirmPickup` و `cancelRun`.
 
 ### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
 

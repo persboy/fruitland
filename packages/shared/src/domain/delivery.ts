@@ -175,6 +175,15 @@ export function hasPendingStops(stops: ReadonlyArray<Pick<DeliveryStopLike, "sta
  * not allow. Not a new lifecycle: the states are `ORDER_DELIVERY_STATUSES`.
  * "assigned → unassigned" is the release of an assignment that was never
  * picked up (run cancelled).
+ *
+ * "assigned" and "picked_up" are deliberately distinct states, not
+ * paperwork vs. the same event (Phase 14 Decision Review, Decision 2 —
+ * approved): "assigned" is official assignment by admin activation
+ * (`assignedAt`, Decision 1); "picked_up" is the courier's confirmed
+ * physical custody of the goods (`pickedUpAt`, always an explicit courier
+ * action — see `confirmPickup` in services/deliveryRunService.ts, never
+ * implied by any other operation). "picked_up → proposed" — not
+ * "assigned → proposed" — is deliberately the only path to a proposal.
  */
 export const ORDER_DELIVERY_TRANSITIONS: Record<OrderDeliveryStatus, readonly OrderDeliveryStatus[]> = {
   unassigned: ["assigned"],

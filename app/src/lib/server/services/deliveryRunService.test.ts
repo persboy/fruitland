@@ -374,6 +374,53 @@ describe("cancelRun", () => {
   });
 });
 
+describe("confirmPickup — Decision 2: an explicit, courier-only, physical-custody event distinct from assignment", () => {
+  it("moves every pending stop's order from assigned to picked_up, sets pickedUpAt, and is scoped to this courier's own assignment", async () => {
+    const run = makeRun([{ seq: 1 }, { seq: 2 }, { seq: 3, status: "delivered" }]);
+    m.runFindOne.mockResolvedValue(run);
+    m.orderUpdateMany.mockResolvedValue({ modifiedCount: 2 });
+
+    const before = Date.now();
+    const result = await confirmPickup(courier, run._id.toString());
+    expect(result.pickedUpCount).toBe(2);
+
+    const [filter, update] = m.orderUpdateMany.mock.calls[0]!;
+    // Only the two still-pending stops' orders — not the already-delivered one.
+    expect(filter._id.$in).toHaveLength(2);
+    expect(filter["delivery.status"]).toBe("assigned");
+    expect(filter["delivery.courierId"].equals(courierId)).toBe(true);
+    expect(update.$set["delivery.status"]).toBe("picked_up");
+    expect(update.$set["delivery.pickedUpAt"]).toBeInstanceOf(Date);
+    expect((update.$set["delivery.pickedUpAt"] as Date).getTime()).toBeGreaterThanOrEqual(before);
+    // assignedAt is never part of this write — Decision 1's assignment timestamp is untouched by pickup.
+    expect(update.$set).not.toHaveProperty("delivery.assignedAt");
+    expect(Object.keys(update.$set)).not.toContain("delivery.assignedAt");
+  });
+
+  it("a courier cannot confirm pickup on another courier's run (looked up by id AND the acting courier)", async () => {
+    m.runFindOne.mockResolvedValue(null);
+    const otherCourier: AuthContext = { userId: otherCourierId.toString(), role: "courier" };
+    const runId = id();
+    await expectAppError(confirmPickup(otherCourier, runId.toString()), "DELIVERY_RUN_NOT_FOUND", 404);
+    const query = m.runFindOne.mock.calls[0]![0] as { _id: Types.ObjectId; courierId: Types.ObjectId };
+    expect(query._id.equals(runId)).toBe(true);
+    expect(query.courierId.equals(otherCourierId)).toBe(true);
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(["draft", "completed", "cancelled"])("refuses pickup on a %s (non-active) run", async (status) => {
+    const run = makeRun([{ seq: 1 }], status);
+    m.runFindOne.mockResolvedValue(run);
+    await expectAppError(confirmPickup(courier, run._id.toString()), "DELIVERY_RUN_NOT_ACTIVE", 409);
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("admin cannot perform the courier's pickup transition", async () => {
+    await expectAppError(confirmPickup(admin, id().toString()), "FORBIDDEN_ROLE", 403);
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("reorderStops (courier, active run)", () => {
   it("writes the new sequences in one atomic update guarded by active status, owner and 'still pending'", async () => {
     const run = makeRun([{ seq: 1, status: "delivered" }, { seq: 2 }, { seq: 3 }, { seq: 4 }]);

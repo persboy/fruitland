@@ -419,7 +419,26 @@ export async function cancelRun(actor: AuthContext, runId: string): Promise<Deli
 
 // ---------------------------------------------------------------- courier
 
-/** The courier takes the goods for all still-pending stops: existing lifecycle step assigned → picked_up. Idempotent. */
+/**
+ * Physical custody changes hands: the courier confirms they have actually
+ * received the goods from the store/warehouse. This is a DIFFERENT moment
+ * from "assigned" (Phase 14 Decision Review, Decision 2 — approved):
+ *
+ *   assigned   = the order was officially handed to this run by admin
+ *                activation (Decision 1) — `assignedAt`, set once, never
+ *                touched again by this function.
+ *   picked_up  = the courier physically has the goods in hand right now —
+ *                `pickedUpAt`, the actual confirmation time.
+ *
+ * Always an explicit courier action — never implied by `proposeStopOutcome`,
+ * reordering, route operations, or activation. `proposeStopOutcome`
+ * continues to require `picked_up` (not merely `assigned`) before a courier
+ * may propose an outcome, because physical custody is the meaningful
+ * milestone, not just the paperwork of assignment.
+ *
+ * Applies to all still-pending stops in one call and is idempotent (a stop
+ * already past "pending" is simply not touched again).
+ */
 export async function confirmPickup(actor: AuthContext, runId: string): Promise<{ pickedUpCount: number }> {
   requireRole(actor, ["courier"]);
   const run = await loadOwnRun(actor, runId);

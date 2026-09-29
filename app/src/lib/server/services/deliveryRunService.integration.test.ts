@@ -167,7 +167,13 @@ describe("activateRun (transactional — requires a replica set)", () => {
     const [a, b, c] = [await makeOrder(1), await makeOrder(2), await makeOrder(3)];
     const draft = await createDraftRun(admin, { courierId: courier.userId, orderIds: [a, b, c].map((o) => o._id.toString()) });
     const active = await activateRun(admin, draft.id);
+    const assignedAtBefore = (await Order.findById(a._id))?.delivery.assignedAt?.getTime();
     await confirmPickup(courier, active.id);
+
+    const pickedUp = await Order.findById(a._id);
+    expect(pickedUp?.delivery.status).toBe("picked_up");
+    expect(pickedUp?.delivery.pickedUpAt).toBeInstanceOf(Date); // Decision 2: a distinct, real physical-custody timestamp...
+    expect(pickedUp?.delivery.assignedAt?.getTime()).toBe(assignedAtBefore); // ...that never touches assignedAt (Decision 1).
 
     const ids = active.stops.map((s) => s.id);
     const reordered = await reorderStops(courier, active.id, [ids[2]!, ids[0]!, ids[1]!]);

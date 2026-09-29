@@ -70,9 +70,23 @@ const orderAddressSnapshotSchema = new Schema<IOrderAddressSnapshot>(
 /**
  * Independent from `Order.status` — see docs/domain-model.md §4. Only an
  * admin transition can set `status: "resolved"`; a courier can only reach
- * "proposed". `resolvedAt` is the timestamp used for courier performance
- * reporting (Project Instructions §8: "starts from Admin approval, ends at
- * final delivery").
+ * "proposed". Four distinct moments, not to be confused with each other
+ * (Phase 14 Decision Review, Decision 2 — approved):
+ *
+ *   assignedAt  = the order was officially handed to a courier's active
+ *                 DeliveryRun by admin activation (services/deliveryRunService.ts
+ *                 `activateRun`, Decision 1). This is the "official
+ *                 assignment" instant Project Instructions §8 means by
+ *                 "delivery performance starts from Admin approval".
+ *   pickedUpAt  = the courier physically received the goods and confirmed
+ *                 custody (`confirmPickup`) — a real-world event distinct
+ *                 from the paperwork of assignment. Recorded, but NOT (in
+ *                 this phase) used as a performance-measurement boundary or
+ *                 in any reporting/analytics.
+ *   proposedAt  = the courier's claimed outcome (delivered/returned),
+ *                 pending admin confirmation.
+ *   resolvedAt  = the timestamp used for courier performance reporting
+ *                 (Project Instructions §8: "... ends at final delivery").
  */
 export interface IOrderDelivery {
   status: OrderDeliveryStatus;
