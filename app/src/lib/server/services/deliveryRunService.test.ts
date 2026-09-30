@@ -12,6 +12,8 @@ const m = vi.hoisted(() => ({
   orderUpdateMany: vi.fn(),
   orderCount: vi.fn(),
   userFindOne: vi.fn(),
+  userUpdateOne: vi.fn(),
+  userUpdateMany: vi.fn(),
   startSession: vi.fn(),
 }));
 
@@ -27,7 +29,9 @@ vi.mock("../models/DeliveryRun", () => ({
 vi.mock("../models/Order", () => ({
   Order: { updateOne: m.orderUpdateOne, updateMany: m.orderUpdateMany, countDocuments: m.orderCount },
 }));
-vi.mock("../models/User", () => ({ User: { findOne: m.userFindOne } }));
+vi.mock("../models/User", () => ({
+  User: { findOne: m.userFindOne, updateOne: m.userUpdateOne, updateMany: m.userUpdateMany },
+}));
 vi.mock("mongoose", async (importOriginal) => {
   const actual = await importOriginal<typeof import("mongoose")>();
   return { ...actual, startSession: m.startSession };
@@ -683,5 +687,79 @@ describe("Decision 3 (approved, Option F): DeliveryRun never mutates Order.statu
     await skipStop(courier, run._id.toString(), run.stops[0]!._id.toString());
     expect(m.orderUpdateOne).not.toHaveBeenCalled();
     expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("Decision 5 (approved): courier availability is deferred — courierProfile.status never gates or is mutated by DeliveryRun", () => {
+  const courierWithStatus = (status: string) => ({ courierProfile: { vehicleType: "motorcycle", status } });
+
+  it.each(["offline", "online", "busy"] as const)(
+    "createDraftRun succeeds for a courier whose courierProfile.status is '%s'",
+    async (status) => {
+      m.userFindOne.mockResolvedValue(courierWithStatus(status));
+      m.orderCount.mockResolvedValue(1);
+      const runId = id();
+      m.runCreate.mockResolvedValue({ _id: runId });
+      const orderId = id();
+      m.runFindById.mockResolvedValue({ _id: runId, courierId, status: "draft", stops: [{ _id: id(), orderId, sequence: 1, status: "pending" }] });
+
+      const dto = await createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderId.toString()] });
+      expect(dto.status).toBe("draft");
+      // The eligibility filter is role + isActive only — status is not part of the query at all.
+      expect(m.userFindOne.mock.calls[0]![0]).toMatchObject({ role: "courier", isActive: true });
+      expect(m.userFindOne.mock.calls[0]![0]).not.toHaveProperty("courierProfile.status");
+    },
+  );
+
+  it.each(["offline", "online", "busy"] as const)(
+    "activateRun succeeds regardless of the courier's courierProfile.status ('%s') — offline does not block it, online/busy grant nothing special",
+    async (status) => {
+      // activateRun never loads the courier's User document at all (see below) —
+      // 'status' here only documents which value this scenario represents.
+      void status;
+      const run = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }] };
+      m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "active" });
+      m.startSession.mockResolvedValue(fakeSession());
+      m.runExists.mockResolvedValue(null);
+      m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+
+      const active = await activateRun(admin, run._id.toString());
+      expect(active.status).toBe("active");
+      expect(m.userFindOne).not.toHaveBeenCalled();
+    },
+  );
+
+  it("no DeliveryRun operation ever writes to the User collection (courierProfile.status is never mutated)", async () => {
+    // A representative sweep across admin- and courier-facing operations, including
+    // activation (the one place Decisions 1 and 4 write real state).
+    const orderId = id();
+    m.userFindOne.mockResolvedValue(courierWithStatus("offline"));
+    m.orderCount.mockResolvedValue(1);
+    const draftId = id();
+    m.runCreate.mockResolvedValue({ _id: draftId });
+    const draft = { _id: draftId, courierId, status: "draft", stops: [{ _id: id(), orderId, sequence: 1, status: "pending" }] };
+    m.runFindById.mockResolvedValue(draft);
+    await createDraftRun(admin, { courierId: courierId.toString(), orderIds: [orderId.toString()] });
+
+    m.startSession.mockResolvedValue(fakeSession());
+    m.runExists.mockResolvedValue(null);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    await activateRun(admin, draftId.toString());
+
+    const activeRun = makeRun([{ seq: 1 }]);
+    m.runFindOne.mockResolvedValue(activeRun);
+    m.orderUpdateMany.mockResolvedValue({ modifiedCount: 1 });
+    await confirmPickup(courier, activeRun._id.toString());
+
+    expect(m.userUpdateOne).not.toHaveBeenCalled();
+    expect(m.userUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("User.isActive remains the only, separate account-level gate — an inactive account is still rejected regardless of courierProfile.status", async () => {
+    m.userFindOne.mockResolvedValue(null); // simulates the {role:"courier", isActive:true} filter matching nothing
+    await expectAppError(createDraftRun(admin, { courierId: courierId.toString(), orderIds: [id().toString()] }), "COURIER_NOT_FOUND", 400);
+    expect(m.runCreate).not.toHaveBeenCalled();
   });
 });

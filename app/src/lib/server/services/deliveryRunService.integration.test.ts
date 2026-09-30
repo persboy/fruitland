@@ -68,6 +68,15 @@ describe("DeliveryRun — planning / activation eligibility (standalone MongoDB)
     expect(fresh?.status).toBe("preparing");
   });
 
+  it("Decision 5: an 'offline' courier is still fully eligible for draft creation, and courierProfile.status is left untouched", async () => {
+    await seedPeople();
+    await User.updateOne({ _id: courierDoc._id }, { $set: { "courierProfile.status": "offline" } });
+    const order = await makeOrder(1);
+    const draft = await createDraftRun(admin, { courierId: courier.userId, orderIds: [order._id.toString()] });
+    expect(draft.status).toBe("draft");
+    expect((await User.findById(courierDoc._id))?.courierProfile?.status).toBe("offline"); // unchanged
+  });
+
   it("the SAME order may sit in several draft runs at once — the partial unique index does not cover drafts", async () => {
     await seedPeople();
     const order = await makeOrder(1);
@@ -134,6 +143,17 @@ describe("activateRun (transactional — requires a replica set)", () => {
       expect(fresh?.delivery.courierId?.toString()).toBe(courier.userId);
       expect(fresh?.delivery.assignedAt?.getTime()).toBeGreaterThanOrEqual(before);
     }
+  });
+
+  it("Decision 5: activation succeeds for an 'offline' courier, and courierProfile.status is left completely untouched by activation", async () => {
+    await seedPeople();
+    await User.updateOne({ _id: courier.userId }, { $set: { "courierProfile.status": "offline" } });
+    const order = await makeOrder(1);
+    const draft = await createDraftRun(admin, { courierId: courier.userId, orderIds: [order._id.toString()] });
+
+    const active = await activateRun(admin, draft.id); // must succeed despite "offline"
+    expect(active.status).toBe("active");
+    expect((await User.findById(courier.userId))?.courierProfile?.status).toBe("offline"); // still unchanged — no auto-sync to "busy"
   });
 
   it("all-or-nothing: if one order is no longer eligible, NONE are assigned and the run stays draft", async () => {

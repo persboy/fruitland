@@ -40,6 +40,13 @@ Legacy یک سیستم آنلاین‌پرداخت کامل (ZarinPal) و کیف
 | **User** | مشتری/ادمین/پیک با فیلد `role` | خودش | فعال ↔ غیرفعال | بله |
 | Address *(subdoc)* | آدرس‌های کاربر (فیلدهای نرمال‌شده‌ی نقشه، Phase 4.5 مرحله‌ی ۱۰) | User | ندارد | نه — Embedded در User |
 | CourierProfile *(subdoc)* | وضعیت/وسیله‌ی پیک | User (role=courier) | آفلاین↔آنلاین↔مشغول | نه — Embedded در User |
+
+**Phase 14 Decision Review، Decision 5 (تأییدشده) — availability پیک به فاز رسمی Courier موکول شد:**
+- `courierProfile.status` (`offline|online|busy`) در فاز ۱۴ **هیچ اثری روی ایجاد/فعال‌سازی `DeliveryRun` ندارد** — نه `createDraftRun`، نه `activateRun` آن را می‌خوانند. مقدار `offline` مانع نیست؛ `online`/`busy` هیچ مجوز خاصی نمی‌دهند.
+- **هیچ همگام‌سازی خودکاری بین `DeliveryRun.status` و `courierProfile.status` وجود ندارد** — نه فعال‌سازی آن را `busy` می‌کند، نه اتمام/لغو آن را `online` می‌کند.
+- معنای عملیاتی، مالکیت، و قوانین گذار این فیلد عمداً به فاز رسمی Courier موکول شده است.
+- `User.isActive` یک مفهوم کاملاً جدا و سطح حساب باقی می‌ماند؛ تنها دروازه‌ی eligibility پیک همچنان همین است.
+- قید Decision 4 («حداکثر یک run فعال برای هر پیک»، با ایندکس یکتای جزئی روی `courierId`) کاملاً مستقل از `courierProfile.status` باقی می‌ماند.
 | **SystemState** | تعیین اتمیک اولین کاربر = MASTER_ADMIN | سیستم | Singleton | بله |
 | **Category** | دسته‌بندی محصول (قابل‌مدیریت در ادمین) | Admin | فعال↔غیرفعال، ترتیب | بله |
 | **Product** | کالای فروشگاه | Admin | فعال↔غیرفعال | بله |

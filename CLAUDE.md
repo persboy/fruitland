@@ -366,7 +366,15 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **قید در سطح دیتابیس است، نه فقط چک سرویس:** ایندکس یکتای جزئی جدید `{courierId:1}` با `partialFilterExpression:{status:"active"}` در `models/DeliveryRun.ts` (کنار ایندکس مشابه سطح سفارش از Decision 1؛ هر دو از یک الگو و همان ثابت `RESERVING_DELIVERY_RUN_STATUS="active"` استفاده می‌کنند — بدون نیاز به `$in`، پس بدون نیازمندی MongoDB ≥ 6.0). ایندکس معمولی موجود `{courierId,status}` برای فهرست‌کردن runهای یک پیک دست‌نخورده ماند.
 - **`activateRun`** یک پیش‌بررسی سریع داخل همان تراکنش دارد (`DeliveryRun.exists({courierId,status:"active"})` با همان session) تا خطای واضح بدهد، **اما این پیش‌بررسی مرجع نیست** — مرجع نهایی همان ایندکس یکتاست؛ خطای duplicate-key روی این ایندکس هم گرفته و به همان کد خطا تبدیل می‌شود (`duplicateKeyIndexField` تشخیص می‌دهد کدام ایندکس نقض شده: `courierId` یا `stops.orderId`).
 - **کد خطا:** `COURIER_ALREADY_HAS_ACTIVE_RUN` (409). تلاش دوم بدون هیچ نوشتن جزئی رد می‌شود (all-or-nothing از Decision 1 حفظ شد).
-- **دست‌نخورده ماند:** `courierProfile.status`/availability (Decision 5)، معنای `skipped`، سیاست لغو بعد از pickup (Decision 6)، و مالکیت `Order.status` (Decision 3).
+- **دست‌نخورده ماند:** `courierProfile.status`/availability (Decision 5، حل‌شد — پایین)، معنای `skipped`، سیاست لغو بعد از pickup (Decision 6)، و مالکیت `Order.status` (Decision 3).
+
+#### به‌روزرسانی Phase 14 — Decision Review، Decision 5 (تأییدشده): availability پیک به فاز رسمی Courier موکول شد
+
+- **`courierProfile.status` (`offline|online|busy`) هیچ اثری روی `DeliveryRun` ندارد.** `createDraftRun` فقط `role="courier"` و `isActive=true` را چک می‌کند (نه `courierProfile.status`). `activateRun` اصلاً سند `User` را نمی‌خواند.
+- **هیچ همگام‌سازی خودکاری معرفی نشد** — نه `active DeliveryRun → busy`، نه `completed/cancelled → online`، و نه جهت معکوس آن‌ها. دو زیرسیستم کاملاً مستقل باقی می‌مانند (همان الگوی Decision 3 برای `Order.status`/`Order.delivery`).
+- **`User.isActive` مستقل از `courierProfile.status` ماند** و تنها دروازه‌ی eligibility حساب باقی است.
+- **قید Decision 4 («حداکثر یک run فعال»، ایندکس یکتای جزئی روی `courierId`) دست‌نخورده و کاملاً مستقل از `courierProfile.status` ماند** — `busy` جایگزین یا معادل آن قید نشد.
+- **هیچ کد، endpoint، enum یا فیلد جدیدی اضافه نشد** — این یک تصمیم مرزی/مستندسازی محض بود؛ مالکیت و قوانین گذار `courierProfile.status` به فاز رسمی Courier موکول شد.
 
 ### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
 
