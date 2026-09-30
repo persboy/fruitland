@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   runFindById: vi.fn(),
   runUpdateOne: vi.fn(),
   runCreate: vi.fn(),
+  runExists: vi.fn(),
   orderUpdateOne: vi.fn(),
   orderUpdateMany: vi.fn(),
   orderCount: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock("../models/DeliveryRun", () => ({
     findById: (...a: unknown[]) => ({ lean: () => m.runFindById(...a) }),
     updateOne: m.runUpdateOne,
     create: m.runCreate,
+    exists: (...a: unknown[]) => ({ session: () => m.runExists(...a) }),
   },
 }));
 vi.mock("../models/Order", () => ({
@@ -255,6 +257,7 @@ describe("activateRun — the one transactional, all-or-nothing operation", () =
     const run = { _id: id(), courierId, status: "draft", stops: stops.map((s) => ({ _id: id(), orderId: s.orderId, sequence: 1, status: "pending" })) };
     m.runFindById.mockResolvedValue(run);
     m.startSession.mockResolvedValue(fakeSession());
+    m.runExists.mockResolvedValue(null); // no other active run for this courier, by default
     return run;
   }
 
@@ -334,6 +337,46 @@ describe("activateRun — the one transactional, all-or-nothing operation", () =
     m.orderUpdateOne.mockResolvedValue({ modifiedCount: 0 });
     await expectAppError(activateRun(admin, run._id.toString()), "ORDER_NOT_ASSIGNABLE", 409);
     expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  describe("Decision 4 (approved): at most one active run per courier", () => {
+    it("the pre-check queries for another ACTIVE run of this SAME courier, inside the transaction's session", async () => {
+      const run = arrangeDraft([{ orderId: id() }]);
+      m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      await activateRun(admin, run._id.toString());
+      expect(m.runExists.mock.calls[0]![0]).toMatchObject({ courierId, status: "active" });
+    });
+
+    it("rejects activation when the courier already has another active run — no order is touched, no flip happens", async () => {
+      const run = arrangeDraft([{ orderId: id() }, { orderId: id() }]);
+      m.runExists.mockResolvedValue({ _id: id() });
+      await expectAppError(activateRun(admin, run._id.toString()), "COURIER_ALREADY_HAS_ACTIVE_RUN", 409);
+      expect(m.orderUpdateOne).not.toHaveBeenCalled();
+      expect(m.runUpdateOne).not.toHaveBeenCalled();
+    });
+
+    it("maps a courierId-index duplicate-key error (the authoritative DB-level guard) to the same domain error as the pre-check", async () => {
+      arrangeDraft([{ orderId: id() }]);
+      m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      m.runUpdateOne.mockRejectedValue(Object.assign(new Error("E11000 duplicate key"), { code: 11000, keyPattern: { courierId: 1 } }));
+      await expectAppError(activateRun(admin, id().toString()), "COURIER_ALREADY_HAS_ACTIVE_RUN", 409);
+    });
+
+    it("a stops.orderId-index duplicate-key error still maps to the order-level conflict, not the courier one", async () => {
+      arrangeDraft([{ orderId: id() }]);
+      m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      m.runUpdateOne.mockRejectedValue(Object.assign(new Error("E11000 duplicate key"), { code: 11000, keyPattern: { "stops.orderId": 1 } }));
+      await expectAppError(activateRun(admin, id().toString()), "ORDER_ALREADY_IN_ACTIVE_RUN", 409);
+    });
+
+    it("does not mutate Order.status — Decision 3's invariant holds for the new pre-check path too", async () => {
+      const run = arrangeDraft([{ orderId: id() }]);
+      m.runExists.mockResolvedValue({ _id: id() });
+      await expectAppError(activateRun(admin, run._id.toString()), "COURIER_ALREADY_HAS_ACTIVE_RUN", 409);
+      expect(m.orderUpdateOne).not.toHaveBeenCalled();
+      expect(m.orderUpdateMany).not.toHaveBeenCalled();
+    });
   });
 });
 

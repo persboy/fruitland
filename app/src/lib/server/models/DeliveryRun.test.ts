@@ -54,6 +54,13 @@ describe("DeliveryRun schema", () => {
     expect(options).toMatchObject({ unique: true, partialFilterExpression: { status: "active" } });
   });
 
+  it("declares the partial unique index that enforces at most one ACTIVE run per courier (Decision 4 — approved)", () => {
+    const index = DeliveryRun.schema.indexes().find(([fields]) => Object.keys(fields).join() === "courierId");
+    expect(index).toBeDefined();
+    const options = index?.[1];
+    expect(options).toMatchObject({ unique: true, partialFilterExpression: { status: "active" } });
+  });
+
   it("indexes a courier's runs by status", () => {
     expect(DeliveryRun.schema.indexes().some(([fields]) => Object.keys(fields).join() === "courierId,status")).toBe(true);
   });

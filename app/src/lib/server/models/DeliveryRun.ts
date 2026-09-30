@@ -93,5 +93,26 @@ deliveryRunSchema.index(
   { unique: true, partialFilterExpression: { status: RESERVING_DELIVERY_RUN_STATUS } },
 );
 
+/**
+ * THE one-active-run-per-courier invariant (Phase 14 Decision Review,
+ * Decision 4 — approved): a courier may have any number of "draft" runs
+ * (Decision 1 — drafts reserve nothing) and any number of "completed"/
+ * "cancelled" runs (history), but at most one "active" run at a time.
+ * Same shape as the order-reservation index above — a plain equality
+ * partial filter on exactly `RESERVING_DELIVERY_RUN_STATUS` ("active"),
+ * so it carries the same no-MongoDB-6.0-requirement property. This index,
+ * not the service-level pre-check in `activateRun`, is the authoritative
+ * concurrency guard: two concurrent `activateRun` calls for the same
+ * courier's two different drafts can both pass a pre-check read, but only
+ * one of their two transactions can win the final index-guarded write —
+ * the loser's whole transaction (including any Order writes it made)
+ * aborts. This does NOT touch `courierProfile.status`/availability
+ * (Decision 5, separate and not yet decided).
+ */
+deliveryRunSchema.index(
+  { courierId: 1 },
+  { unique: true, partialFilterExpression: { status: RESERVING_DELIVERY_RUN_STATUS } },
+);
+
 export const DeliveryRun =
   (models.DeliveryRun as Model<IDeliveryRun> | undefined) || model<IDeliveryRun>("DeliveryRun", deliveryRunSchema);

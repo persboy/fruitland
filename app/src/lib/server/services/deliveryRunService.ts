@@ -133,6 +133,15 @@ class OrderNotEligibleError extends Error {
 }
 /** Internal control-flow marker: the run itself was no longer a draft by the time the transaction tried to flip it. */
 class RunChangedDuringActivationError extends Error {}
+/** Internal control-flow marker: the service-level pre-check (not the authoritative guard — see the courierId partial unique index) found another active run for this courier. */
+class CourierAlreadyHasActiveRunError extends Error {}
+
+/** From a MongoDB E11000 error, the leading field of the violated index's key pattern (e.g. "courierId" or "stops.orderId") — lets one duplicate-key catch site distinguish which of DeliveryRun's two partial unique indexes was hit, without depending on message text. */
+function duplicateKeyIndexField(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const keyPattern = (error as { keyPattern?: Record<string, unknown> }).keyPattern;
+  return keyPattern ? Object.keys(keyPattern)[0] : undefined;
+}
 
 function assertOrderTransition(from: "unassigned" | "assigned" | "picked_up" | "proposed", to: "unassigned" | "assigned" | "picked_up" | "proposed", actor: AuthContext): void {
   if (!canActorTransitionOrderDelivery(from, to, actor.role)) {
@@ -299,6 +308,14 @@ export async function reorderDraftStops(actor: AuthContext, runId: string, order
  * documents (the orders and the run). `session.withTransaction` retries
  * transient errors and commits/aborts as a unit.
  *
+ * Also enforces (Phase 14 Decision Review, Decision 4 — approved): a
+ * courier may have any number of "draft" runs but at most one "active" run
+ * at a time. A service-level pre-check inside the transaction gives a fast,
+ * clear rejection in the common case, but the actual concurrency guard is
+ * the `courierId` partial unique index in models/DeliveryRun.ts — see that
+ * index's doc comment. This does NOT touch `courierProfile.status`/
+ * availability (Decision 5, separate and not yet decided).
+ *
  * ENVIRONMENT REQUIREMENT: transactions require a replica set or mongos —
  * a standalone `mongod` cannot run them at all. The project's default local
  * `MONGODB_URI` (`mongodb://localhost:27017/...`, see app/.env.example) and
@@ -333,6 +350,15 @@ export async function activateRun(actor: AuthContext, runId: string): Promise<De
   const session = await startSession();
   try {
     await session.withTransaction(async () => {
+      // Service-level pre-check (Decision 4) — a fast, clear rejection in the
+      // common case, but NOT the safety net: see the `courierId` partial
+      // unique index in models/DeliveryRun.ts, which is what actually
+      // prevents two concurrent activations for the same courier from both
+      // succeeding. Reading with this transaction's session so the check is
+      // part of the same atomic unit as everything below it.
+      const otherActiveRun = await DeliveryRun.exists({ courierId: draft.courierId, status: "active" }).session(session);
+      if (otherActiveRun) throw new CourierAlreadyHasActiveRunError();
+
       for (const stop of draft.stops) {
         const result = await Order.updateOne(
           { _id: stop.orderId, status: "preparing", "delivery.status": "unassigned" },
@@ -349,6 +375,12 @@ export async function activateRun(actor: AuthContext, runId: string): Promise<De
       if (flip.modifiedCount !== 1) throw new RunChangedDuringActivationError();
     });
   } catch (error) {
+    if (error instanceof CourierAlreadyHasActiveRunError) {
+      throw AppError.conflict(
+        "این پیک هم‌اکنون یک ماموریت فعال دیگر دارد؛ ابتدا آن را تکمیل یا لغو کنید",
+        "COURIER_ALREADY_HAS_ACTIVE_RUN",
+      );
+    }
     if (error instanceof OrderNotEligibleError) {
       throw AppError.conflict(
         `سفارش دیگر قابل تخصیص نیست؛ کل عملیات فعال‌سازی لغو شد (شناسه سفارش: ${error.orderId})`,
@@ -359,6 +391,20 @@ export async function activateRun(actor: AuthContext, runId: string): Promise<De
       throw AppError.conflict("وضعیت ماموریت تغییر کرد؛ دوباره تلاش کنید", "DELIVERY_RUN_CHANGED");
     }
     if (isDuplicateKeyError(error)) {
+      // The transaction-authoritative guard (see the two partial unique
+      // indexes in models/DeliveryRun.ts) rejected the final flip. Which
+      // index fired distinguishes a courier already active (Decision 4)
+      // from an order already claimed by another active run (Decision 1) —
+      // this can only be the *courier* index here, since a losing race on
+      // the *order* index at this exact write would mean the order's own
+      // conditional `Order.updateOne` above had already failed first
+      // (OrderNotEligibleError), but both are handled for robustness.
+      if (duplicateKeyIndexField(error) === "courierId") {
+        throw AppError.conflict(
+          "این پیک هم‌اکنون یک ماموریت فعال دیگر دارد؛ ابتدا آن را تکمیل یا لغو کنید",
+          "COURIER_ALREADY_HAS_ACTIVE_RUN",
+        );
+      }
       throw AppError.conflict(
         "یکی از سفارش‌ها هم‌اکنون در یک ماموریت فعال دیگر است؛ کل عملیات فعال‌سازی لغو شد",
         "ORDER_ALREADY_IN_ACTIVE_RUN",

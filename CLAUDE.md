@@ -360,6 +360,14 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **هیچ ماشین‌حالتی برای `Order.status` اضافه نشد** (نه `ORDER_STATUS_TRANSITIONS`، نه actor جدید) — طبق تصمیم، این کار عمداً نیمه‌کاره پیاده نمی‌شود.
 - `Order.status` و `Order.delivery.status` دو زیرسیستم کاملاً مستقل باقی می‌مانند؛ هیچ همگام‌سازی ضمنی بین‌شان معرفی نشد.
 
+#### به‌روزرسانی Phase 14 — Decision Review، Decision 4 (تأییدشده): حداکثر یک run فعال برای هر پیک
+
+- **یک پیک می‌تواند هر تعداد run در وضعیت `draft` داشته باشد (بدون تغییر نسبت به Decision 1)، ولی حداکثر یک run در وضعیت `active`.** run فعال باید `completed` یا `cancelled` شود تا run بعدیِ همان پیک بتواند فعال شود.
+- **قید در سطح دیتابیس است، نه فقط چک سرویس:** ایندکس یکتای جزئی جدید `{courierId:1}` با `partialFilterExpression:{status:"active"}` در `models/DeliveryRun.ts` (کنار ایندکس مشابه سطح سفارش از Decision 1؛ هر دو از یک الگو و همان ثابت `RESERVING_DELIVERY_RUN_STATUS="active"` استفاده می‌کنند — بدون نیاز به `$in`، پس بدون نیازمندی MongoDB ≥ 6.0). ایندکس معمولی موجود `{courierId,status}` برای فهرست‌کردن runهای یک پیک دست‌نخورده ماند.
+- **`activateRun`** یک پیش‌بررسی سریع داخل همان تراکنش دارد (`DeliveryRun.exists({courierId,status:"active"})` با همان session) تا خطای واضح بدهد، **اما این پیش‌بررسی مرجع نیست** — مرجع نهایی همان ایندکس یکتاست؛ خطای duplicate-key روی این ایندکس هم گرفته و به همان کد خطا تبدیل می‌شود (`duplicateKeyIndexField` تشخیص می‌دهد کدام ایندکس نقض شده: `courierId` یا `stops.orderId`).
+- **کد خطا:** `COURIER_ALREADY_HAS_ACTIVE_RUN` (409). تلاش دوم بدون هیچ نوشتن جزئی رد می‌شود (all-or-nothing از Decision 1 حفظ شد).
+- **دست‌نخورده ماند:** `courierProfile.status`/availability (Decision 5)، معنای `skipped`، سیاست لغو بعد از pickup (Decision 6)، و مالکیت `Order.status` (Decision 3).
+
 ### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
 
 `RouteOptions.vehicleType?: VehicleType` (از enum مشترک `car|motorcycle|bicycle`) به رابط `RoutingProvider` اضافه شد. Business logic هیچ مقداری را ثابت نمی‌فرستد. `NeshanProvider.getRoute` این را به `type=car` یا `type=motorcycle` نگاشت می‌کند (Neshan بایسیکل ندارد → `bicycle` باعث `UNSUPPORTED_OPERATION` می‌شود، نه fallback خاموش). اگر caller چیزی ندهد، پیش‌فرض adapter (نه Business logic) اعمال می‌شود — برای Neshan `car`.

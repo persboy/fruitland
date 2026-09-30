@@ -48,6 +48,8 @@ Legacy یک سیستم آنلاین‌پرداخت کامل (ZarinPal) و کیف
 | OrderItem *(subdoc)* | آیتم سفارش (Snapshot قیمت/نام) | Order | ندارد | نه — Embedded |
 | OrderDelivery *(subdoc)* | تخصیص/تحویل پیک | Order | assigned→pickedUp→resolved | نه — Embedded |
 | **DeliveryRun** *(Phase 14)* | دسته/مسیر یک پیک شامل چند سفارش (stopهای مرتب) | Admin/Courier | draft→active→completed/cancelled | بله — جدا از `Order.delivery`؛ جزئیات در CLAUDE.md |
+
+هر پیک حداکثر یک `DeliveryRun` در وضعیت `active` می‌تواند داشته باشد (هر تعداد `draft`/`completed`/`cancelled` آزاد است) — با ایندکس یکتای جزئی روی `courierId` اجرا می‌شود، نه فقط بررسی سرویس (Phase 14 Decision Review، Decision 4). جزئیات در `CLAUDE.md`.
 | **OrderCounter** | شمارنده‌ی اتمیک شماره‌ی سفارش | سیستم | Singleton | بله |
 | **DiscountCode** | کد تخفیف عمومی/شخصی | Admin | فعال↔غیرفعال، مصرف‌شده | بله |
 | **Review** | نظر مشتری روی محصولِ سفارشِ تحویل‌شده | User | ثابت پس از ثبت | بله |

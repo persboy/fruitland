@@ -149,17 +149,99 @@ describe("activateRun (transactional — requires a replica set)", () => {
     expect((await Order.findById(a._id))?.delivery.status).toBe("unassigned"); // rolled back by the transaction
   });
 
-  it("once one draft activates an order, activating a second draft with the same order fails atomically and cleanly", async () => {
+  it("once one draft activates an order, activating a DIFFERENT courier's draft with the same order fails atomically and cleanly (Decision 1, isolated from Decision 4)", async () => {
     await seedPeople();
+    const otherCourierDoc = await User.create({ phone: "09120000004", role: "courier", courierProfile: { vehicleType: "bicycle" } });
+    const otherCourier: AuthContext = { userId: otherCourierDoc._id.toString(), role: "courier" };
     const order = await makeOrder(1);
+    // Two DIFFERENT couriers, so this isolates the order-level unique constraint (Decision 1)
+    // from the courier-level one-active-run constraint (Decision 4, tested separately below).
     const draftA = await createDraftRun(admin, { courierId: courier.userId, orderIds: [order._id.toString()] });
-    const draftB = await createDraftRun(admin, { courierId: courier.userId, orderIds: [order._id.toString()] });
+    const draftB = await createDraftRun(admin, { courierId: otherCourier.userId, orderIds: [order._id.toString()] });
 
     await activateRun(admin, draftA.id);
     await expect(activateRun(admin, draftB.id)).rejects.toMatchObject({ code: expect.stringMatching(/ORDER_NOT_ASSIGNABLE|ORDER_ALREADY_IN_ACTIVE_RUN/) });
 
     expect((await DeliveryRun.findById(draftB.id))?.status).toBe("draft");
     expect((await Order.findById(order._id))?.delivery.status).toBe("assigned");
+    expect((await Order.findById(order._id))?.delivery.courierId?.toString()).toBe(courier.userId); // still courier A's, not otherCourier's
+  });
+
+  describe("Decision 4 (approved): at most one active run per courier", () => {
+    it("a courier may hold several draft runs at once", async () => {
+      await seedPeople();
+      const [a, b, c] = [await makeOrder(1), await makeOrder(2), await makeOrder(3)];
+      const drafts = await Promise.all(
+        [a, b, c].map((o) => createDraftRun(admin, { courierId: courier.userId, orderIds: [o._id.toString()] })),
+      );
+      expect(new Set(drafts.map((d) => d.id)).size).toBe(3);
+      for (const d of drafts) expect(d.status).toBe("draft");
+    });
+
+    it("activating a second draft while the first is still active fails, and the first run is untouched", async () => {
+      await seedPeople();
+      const [a, b] = [await makeOrder(1), await makeOrder(2)];
+      const draftA = await createDraftRun(admin, { courierId: courier.userId, orderIds: [a._id.toString()] });
+      const draftB = await createDraftRun(admin, { courierId: courier.userId, orderIds: [b._id.toString()] });
+      await activateRun(admin, draftA.id);
+
+      await expect(activateRun(admin, draftB.id)).rejects.toMatchObject({ code: "COURIER_ALREADY_HAS_ACTIVE_RUN" });
+
+      expect((await DeliveryRun.findById(draftA.id))?.status).toBe("active");
+      expect((await DeliveryRun.findById(draftB.id))?.status).toBe("draft");
+      expect((await Order.findById(b._id))?.delivery.status).toBe("unassigned"); // never touched
+    });
+
+    it("activating a second draft becomes possible once the first run is completed", async () => {
+      await seedPeople();
+      const [a, b] = [await makeOrder(1), await makeOrder(2)];
+      const draftA = await createDraftRun(admin, { courierId: courier.userId, orderIds: [a._id.toString()] });
+      const runA = await activateRun(admin, draftA.id);
+      const draftB = await createDraftRun(admin, { courierId: courier.userId, orderIds: [b._id.toString()] });
+      await expect(activateRun(admin, draftB.id)).rejects.toMatchObject({ code: "COURIER_ALREADY_HAS_ACTIVE_RUN" });
+
+      await confirmPickup(courier, runA.id);
+      await proposeStopOutcome(courier, runA.id, runA.stops[0]!.id, "delivered");
+      expect((await DeliveryRun.findById(runA.id))?.status).toBe("completed"); // no pending stops left
+
+      const activeB = await activateRun(admin, draftB.id);
+      expect(activeB.status).toBe("active");
+    });
+
+    it("activating a second draft becomes possible once the first run is cancelled", async () => {
+      await seedPeople();
+      const [a, b] = [await makeOrder(1), await makeOrder(2)];
+      const draftA = await createDraftRun(admin, { courierId: courier.userId, orderIds: [a._id.toString()] });
+      const draftB = await createDraftRun(admin, { courierId: courier.userId, orderIds: [b._id.toString()] });
+      const runA = await activateRun(admin, draftA.id);
+      await cancelRun(admin, runA.id); // still only "assigned" (not picked up) — cancellable per existing cancelRun rules
+
+      const activeB = await activateRun(admin, draftB.id);
+      expect(activeB.status).toBe("active");
+    });
+
+    it("two different couriers may each independently hold one active run without conflict", async () => {
+      await seedPeople();
+      const otherCourierDoc = await User.create({ phone: "09120000003", role: "courier", courierProfile: { vehicleType: "car" } });
+      const otherCourier: AuthContext = { userId: otherCourierDoc._id.toString(), role: "courier" };
+      const [a, b] = [await makeOrder(1), await makeOrder(2)];
+      const draftA = await createDraftRun(admin, { courierId: courier.userId, orderIds: [a._id.toString()] });
+      const draftB = await createDraftRun(admin, { courierId: otherCourier.userId, orderIds: [b._id.toString()] });
+
+      const [activeA, activeB] = await Promise.all([activateRun(admin, draftA.id), activateRun(admin, draftB.id)]);
+      expect(activeA.status).toBe("active");
+      expect(activeB.status).toBe("active");
+    });
+
+    it("does not mutate Order.status when rejecting a second active run for the same courier", async () => {
+      await seedPeople();
+      const [a, b] = [await makeOrder(1), await makeOrder(2)];
+      const draftA = await createDraftRun(admin, { courierId: courier.userId, orderIds: [a._id.toString()] });
+      const draftB = await createDraftRun(admin, { courierId: courier.userId, orderIds: [b._id.toString()] });
+      await activateRun(admin, draftA.id);
+      await expect(activateRun(admin, draftB.id)).rejects.toMatchObject({ code: "COURIER_ALREADY_HAS_ACTIVE_RUN" });
+      expect((await Order.findById(b._id))?.status).toBe("preparing"); // Decision 3: Order.status is never touched by DeliveryRun
+    });
   });
 
   it("full flow after activation: pickup → reorder → propose; the order is proposed, never resolved", async () => {
