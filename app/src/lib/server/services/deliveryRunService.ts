@@ -106,7 +106,8 @@ function toObjectId(id: string, onInvalid: () => AppError): Types.ObjectId {
   return new Types.ObjectId(id);
 }
 
-function isDuplicateKeyError(error: unknown): boolean {
+/** Exported for reuse by any other service that needs the same MongoDB error classification (e.g. services/emergencyCancelService.ts) — one shared classification, not a duplicated check. */
+export function isDuplicateKeyError(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: number }).code === 11000;
 }
 
@@ -117,9 +118,10 @@ function isDuplicateKeyError(error: unknown): boolean {
  * with a message containing "Transaction numbers are only allowed on a
  * replica set member or mongos" — matched on both since the exact code can
  * vary by driver/server version and this is best-effort, not a documented
- * stable contract.
+ * stable contract. Exported for reuse (e.g. services/emergencyCancelService.ts)
+ * so every transactional service shares one classification, not a parallel one.
  */
-function isTransactionsUnsupportedError(error: unknown): boolean {
+export function isTransactionsUnsupportedError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const e = error as { code?: number; message?: string };
   return e.code === 20 || /transaction numbers are only allowed on a replica set|replica set member or mongos/i.test(e.message ?? "");

@@ -1,6 +1,7 @@
 import type {
   DeliveryRunStatus,
   DeliveryStopStatus,
+  EmergencyCancelRequestStatus,
   OrderDeliveryProposedOutcome,
   OrderDeliveryStatus,
   UserRole,
@@ -188,20 +189,22 @@ export function hasPendingStops(stops: ReadonlyArray<Pick<DeliveryStopLike, "sta
 export const ORDER_DELIVERY_TRANSITIONS: Record<OrderDeliveryStatus, readonly OrderDeliveryStatus[]> = {
   unassigned: ["assigned"],
   assigned: ["unassigned", "picked_up"],
-  picked_up: ["proposed"],
+  picked_up: ["proposed", "emergency_cancelled"],
   proposed: ["resolved"],
   resolved: [],
+  emergency_cancelled: [],
 };
 
 type Actor = "admin" | "courier";
 
-/** Who may trigger each transition. Only an admin can reach "resolved" — a courier can go no further than "proposed". */
+/** Who may trigger each transition. Only an admin can reach "resolved" — a courier can go no further than "proposed". "emergency_cancelled" is admin-only too: it is the result of an admin APPROVING a courier's emergency-cancel request (services/emergencyCancelService.ts), not something the courier triggers directly. */
 const ORDER_DELIVERY_ACTORS: Record<string, Actor> = {
   "unassigned>assigned": "admin",
   "assigned>unassigned": "admin",
   "assigned>picked_up": "courier",
   "picked_up>proposed": "courier",
   "proposed>resolved": "admin",
+  "picked_up>emergency_cancelled": "admin",
 };
 
 function actorOf(role: UserRole): Actor | null {
@@ -224,4 +227,22 @@ export function canActorTransitionOrderDelivery(from: OrderDeliveryStatus, to: O
  */
 export function stopOutcomeToProposedOutcome(outcome: "delivered" | "failed"): OrderDeliveryProposedOutcome {
   return outcome === "delivered" ? "delivered" : "returned";
+}
+
+// ---------------------------------------------------------------- Emergency Cancel (Phase 14)
+
+/**
+ * A courier's request to recover an active DeliveryRun after physical
+ * pickup, reviewed by an admin. Run-level (no per-order/per-item request —
+ * see services/emergencyCancelService.ts for why). Approval is the ONLY
+ * path from "picked_up" to "emergency_cancelled" on `Order.delivery`.
+ */
+export const EMERGENCY_CANCEL_REQUEST_TRANSITIONS: Record<EmergencyCancelRequestStatus, readonly EmergencyCancelRequestStatus[]> = {
+  pending: ["approved", "rejected"],
+  approved: [],
+  rejected: [],
+};
+
+export function canTransitionEmergencyCancelRequest(from: EmergencyCancelRequestStatus, to: EmergencyCancelRequestStatus): boolean {
+  return EMERGENCY_CANCEL_REQUEST_TRANSITIONS[from].includes(to);
 }

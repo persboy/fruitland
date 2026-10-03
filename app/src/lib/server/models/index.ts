@@ -7,6 +7,7 @@ export * from "./Product";
 export * from "./OrderCounter";
 export * from "./Order";
 export * from "./DeliveryRun";
+export * from "./DeliveryRunEmergencyCancelRequest";
 export * from "./DiscountCode";
 export * from "./ReviewAttribute";
 export * from "./Review";

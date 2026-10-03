@@ -27,7 +27,12 @@ export type OrderSource = (typeof ORDER_SOURCES)[number];
 /**
  * Delivery sub-lifecycle, independent from Order.status (see
  * docs/domain-model.md §4). "proposed" is set by the courier; only an admin
- * can move a delivery to "resolved".
+ * can move a delivery to "resolved". "emergency_cancelled" (Phase 14
+ * Emergency Cancel) is reached only from "picked_up", only via an admin's
+ * approval of a courier's emergency-cancel request — see
+ * services/emergencyCancelService.ts. This is still `Order.delivery`, NOT
+ * `Order.status` — Decision 3 (DeliveryRun/Emergency Cancel never owns or
+ * mutates `Order.status`) is unaffected by this addition.
  */
 export const ORDER_DELIVERY_STATUSES = [
   "unassigned",
@@ -35,6 +40,7 @@ export const ORDER_DELIVERY_STATUSES = [
   "picked_up",
   "proposed",
   "resolved",
+  "emergency_cancelled",
 ] as const;
 export type OrderDeliveryStatus = (typeof ORDER_DELIVERY_STATUSES)[number];
 
@@ -54,6 +60,10 @@ export type DeliveryRunStatus = (typeof DELIVERY_RUN_STATUSES)[number];
 /** There is deliberately no "next"/"in_progress": the current stop is derived (see getCurrentStop). */
 export const DELIVERY_STOP_STATUSES = ["pending", "delivered", "failed", "skipped"] as const;
 export type DeliveryStopStatus = (typeof DELIVERY_STOP_STATUSES)[number];
+
+/** Lifecycle of a courier's emergency-cancel request for an active DeliveryRun (Phase 14 Emergency Cancel). Independent of DeliveryRunStatus and DeliveryStopStatus — neither gets an "emergency_cancelled" value (see services/emergencyCancelService.ts). */
+export const EMERGENCY_CANCEL_REQUEST_STATUSES = ["pending", "approved", "rejected"] as const;
+export type EmergencyCancelRequestStatus = (typeof EMERGENCY_CANCEL_REQUEST_STATUSES)[number];
 
 export const DISCOUNT_TYPES = ["public", "personal"] as const;
 export type DiscountType = (typeof DISCOUNT_TYPES)[number];

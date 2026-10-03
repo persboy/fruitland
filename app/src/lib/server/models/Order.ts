@@ -87,6 +87,11 @@ const orderAddressSnapshotSchema = new Schema<IOrderAddressSnapshot>(
  *                 pending admin confirmation.
  *   resolvedAt  = the timestamp used for courier performance reporting
  *                 (Project Instructions §8: "... ends at final delivery").
+ *   emergencyCancelledAt = when an admin approved a courier's Emergency
+ *                 Cancel request for the active run this order was in
+ *                 (services/emergencyCancelService.ts). Reached only from
+ *                 "picked_up"; a Replacement Order is created in the same
+ *                 transaction — see `replacesOrderId` below.
  */
 export interface IOrderDelivery {
   status: OrderDeliveryStatus;
@@ -97,6 +102,7 @@ export interface IOrderDelivery {
   proposedAt?: Date;
   resolvedAt?: Date;
   resolvedByUserId?: Types.ObjectId;
+  emergencyCancelledAt?: Date;
 }
 
 const orderDeliverySchema = new Schema<IOrderDelivery>(
@@ -109,6 +115,7 @@ const orderDeliverySchema = new Schema<IOrderDelivery>(
     proposedAt: { type: Date },
     resolvedAt: { type: Date },
     resolvedByUserId: { type: Schema.Types.ObjectId, ref: "User" },
+    emergencyCancelledAt: { type: Date },
   },
   { _id: false },
 );
@@ -141,6 +148,14 @@ export interface IOrder {
   canceledAt?: Date;
   canceledByUserId?: Types.ObjectId;
   customerNote?: string;
+  /**
+   * Set ONLY on a Replacement Order (Phase 14 Emergency Cancel), pointing
+   * at the original order it replaces. One-way by design — the original
+   * order has no reverse field; a Replacement Order is looked up by
+   * querying `replacesOrderId`, exactly like any other reference in this
+   * schema (e.g. Review.orderId). Never set by ordinary order creation.
+   */
+  replacesOrderId?: Types.ObjectId;
 }
 
 const orderSchema = new Schema<IOrder>(
@@ -171,6 +186,7 @@ const orderSchema = new Schema<IOrder>(
     canceledAt: { type: Date },
     canceledByUserId: { type: Schema.Types.ObjectId, ref: "User" },
     customerNote: { type: String },
+    replacesOrderId: { type: Schema.Types.ObjectId, ref: "Order" },
   },
   baseSchemaOptions,
 );
@@ -178,5 +194,7 @@ const orderSchema = new Schema<IOrder>(
 orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ "delivery.courierId": 1, "delivery.status": 1 });
+/** Finding the Replacement Order(s) for an original order (Phase 14 Emergency Cancel). Sparse: most orders never set this field. */
+orderSchema.index({ replacesOrderId: 1 }, { sparse: true });
 
 export const Order = (models.Order as Model<IOrder> | undefined) || model<IOrder>("Order", orderSchema);

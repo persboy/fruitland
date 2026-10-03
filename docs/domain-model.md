@@ -135,6 +135,26 @@ shipped   → returned
 
 گذار `assigned→pickedUp` همیشه با اقدام صریح پیک (`confirmPickup`) رخ می‌دهد و هرگز به‌صورت ضمنی از طریق `proposeStopOutcome`، ترتیب‌دهی مجدد، یا فعال‌سازی run انجام نمی‌شود. `proposeStopOutcome` همچنان نیازمند `pickedUp` است، نه صرفاً `assigned`.
 
+**Phase 14 — Emergency Cancel (تأییدشده):** `pickedUp` یک مسیر خروج دیگر هم دارد: `pickedUp → emergencyCancelled` (فقط با تأیید ادمین روی درخواست لغو اضطراری پیک — `services/emergencyCancelService.ts`). جزئیات کامل در `CLAUDE.md`.
+
+### DeliveryRunEmergencyCancelRequest (Phase 14 — Emergency Cancel)
+
+مکانیزم بازیابی صریح برای یک `DeliveryRun` فعال که حداقل یک سفارش آن `pickedUp` شده — دقیقاً جایی که `cancelRun` عادی عمداً رد می‌کند (`RUN_HAS_PICKED_UP_ORDERS`). سطح run است، نه سطح سفارش/آیتم (این یک فروشگاه میوه است؛ تحویل جزئی مدل نمی‌شود).
+
+```
+pending → approved | rejected   (هر دو پایانی)
+```
+
+- **رد:** یک نوشتن شرطی؛ run و سفارش‌ها دست‌نخورده می‌مانند؛ پیک می‌تواند بعداً دوباره درخواست دهد.
+- **تأیید (تنها عملیات چندسندی و تراکنشی این فایل، دقیقاً مثل `activateRun`):** `DeliveryRun` به `cancelled` می‌رود (گذار موجود، بدون وضعیت جدید run)؛ هر سفارش بر اساس **وضعیت واقعی در لحظه‌ی نوشتن** (نه خواندن قبل از تراکنش) دسته‌بندی می‌شود:
+  - `pickedUp` ← `emergencyCancelled` + یک **سفارش جایگزین کامل** مستقل ساخته می‌شود (`replacesOrderId`، شماره‌ی جدید از `OrderCounter`، کپی کامل اقلام/آدرس/مبالغ، `delivery=unassigned`، بدون تعهد پرداخت دوم چون `isPaid` هرگز کپی نمی‌شود و سیستم فقط COD است).
+  - `assigned` ← `unassigned` (آزادسازی، بدون جایگزین).
+  - هر وضعیت دیگر (مثلاً `proposed`/`resolved` که هم‌زمان رخ داده) ← دست‌نخورده می‌ماند.
+- وضعیت stopها (`pending/delivered/failed/skipped`) هرگز توسط این مکانیزم نوشته نمی‌شود؛ تاریخچه دست‌نخورده می‌ماند.
+- `Order.status` (Decision 3) و `courierProfile.status` (Decision 5) هرگز لمس نمی‌شوند.
+- ثبت بازگشت فیزیکی کالا کاملاً جدا و اطلاعاتی است؛ هرگز مانع ساخت/تخصیص سفارش جایگزین نمی‌شود و run لغوشده را دوباره باز نمی‌کند.
+- Audit کامل از طریق `AuditLog` موجود (بدون مکانیزم audit دوم).
+
 ### DiscountCode
 ```
 active ⇄ inactive   (دستی توسط ادمین)

@@ -6,6 +6,7 @@ import {
   canActorTransitionOrderDelivery,
   canTransitionDeliveryRun,
   canTransitionDeliveryStop,
+  canTransitionEmergencyCancelRequest,
   computeReorderedSequences,
   getCurrentStop,
   isOpenDeliveryRunStatus,
@@ -174,5 +175,39 @@ describe("Order.delivery rules as applied by DeliveryRun code", () => {
   it("a failed stop can only be proposed as 'returned' (the only non-delivered outcome the order lifecycle has)", () => {
     expect(stopOutcomeToProposedOutcome("delivered")).toBe("delivered");
     expect(stopOutcomeToProposedOutcome("failed")).toBe("returned");
+  });
+});
+
+describe("Emergency Cancel (Phase 14): picked_up -> emergency_cancelled, admin-only", () => {
+  it("is reachable only from picked_up, and is terminal", () => {
+    expect(canActorTransitionOrderDelivery("picked_up", "emergency_cancelled", "admin")).toBe(true);
+    for (const from of ORDER_DELIVERY_STATUSES) {
+      if (from !== "picked_up") expect(canActorTransitionOrderDelivery(from, "emergency_cancelled", "admin")).toBe(false);
+    }
+    for (const to of ORDER_DELIVERY_STATUSES) {
+      expect(canActorTransitionOrderDelivery("emergency_cancelled", to, "admin")).toBe(false);
+    }
+  });
+
+  it("a courier can never cause this transition — only an admin's approval can", () => {
+    for (const role of USER_ROLES) {
+      if (role === "admin" || role === "master_admin") continue;
+      expect(canActorTransitionOrderDelivery("picked_up", "emergency_cancelled", role)).toBe(false);
+    }
+  });
+
+  it("picked_up still allows the ordinary proposal path too (emergency_cancelled is an alternative, not a replacement)", () => {
+    expect(canActorTransitionOrderDelivery("picked_up", "proposed", "courier")).toBe(true);
+  });
+});
+
+describe("EmergencyCancelRequest status machine", () => {
+  it("a pending request may be approved or rejected; both are terminal", () => {
+    expect(canTransitionEmergencyCancelRequest("pending", "approved")).toBe(true);
+    expect(canTransitionEmergencyCancelRequest("pending", "rejected")).toBe(true);
+    expect(canTransitionEmergencyCancelRequest("approved", "pending")).toBe(false);
+    expect(canTransitionEmergencyCancelRequest("approved", "rejected")).toBe(false);
+    expect(canTransitionEmergencyCancelRequest("rejected", "pending")).toBe(false);
+    expect(canTransitionEmergencyCancelRequest("rejected", "approved")).toBe(false);
   });
 });

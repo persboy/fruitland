@@ -376,6 +376,21 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **قید Decision 4 («حداکثر یک run فعال»، ایندکس یکتای جزئی روی `courierId`) دست‌نخورده و کاملاً مستقل از `courierProfile.status` ماند** — `busy` جایگزین یا معادل آن قید نشد.
 - **هیچ کد، endpoint، enum یا فیلد جدیدی اضافه نشد** — این یک تصمیم مرزی/مستندسازی محض بود؛ مالکیت و قوانین گذار `courierProfile.status` به فاز رسمی Courier موکول شد.
 
+#### به‌روزرسانی Phase 14 — Decision 6 (تأییدشده و پیاده‌سازی‌شده): Emergency Cancel + سفارش جایگزین
+
+**مدل جدید:** `DeliveryRunEmergencyCancelRequest` (`models/DeliveryRunEmergencyCancelRequest.ts`) — `deliveryRunId, requestedByCourierId, reason, status(pending|approved|rejected), requestedAt, reviewedByAdminUserId, reviewedAt, rejectionReason, replacementOrderIds[], physicalReturn?{returned,recordedByAdminUserId,recordedAt}`. ایندکس یکتای جزئی `{deliveryRunId}` با `partialFilterExpression:{status:"pending"}` (الگوی دقیق Decision 1/4، بدون `$in`، بدون نیازمندی MongoDB≥6.0): حداکثر یک درخواست در انتظار برای هر run.
+
+**enum/گذار جدید (فقط `Order.delivery`، نه `Order.status`):** `ORDER_DELIVERY_STATUSES` یک مقدار گرفت: `"emergency_cancelled"`. گذار `picked_up→emergency_cancelled`، فقط admin، فقط از طریق تأیید (`packages/shared/src/domain/delivery.ts`). افزوده‌ی موازی `Order.delivery.emergencyCancelledAt`. روی `Order` فیلد `replacesOrderId` (یک‌طرفه، فقط روی سفارش جایگزین، sparse index) اضافه شد. `OrderCounter.getNextOrderNumber(session?)` یک پارامتر اختیاری `session` گرفت تا در تراکنش تأیید شرکت کند (بدون تغییر رفتار برای فراخوان‌های موجود).
+
+**سرویس:** `services/emergencyCancelService.ts` — `requestEmergencyCancel` (courier-only, فقط run فعال خودش, نیازمند حداقل یک سفارش `picked_up`, بدون نوشتن روی run/سفارش)، `reviewEmergencyCancelRequest` (admin-only؛ رد = یک نوشتن شرطی؛ تأیید = **تنها عملیات تراکنشی این فایل**، دقیقاً الگوی `activateRun`: claim درخواست → cancel کردن run → برای هر stop، **بر اساس وضعیت واقعی سفارش در لحظه‌ی نوشتن** (نه خواندن قبل از تراکنش): `picked_up→emergency_cancelled`+ساخت سفارش جایگزین، یا `assigned→unassigned` (آزادسازی)، یا دست‌نخورده اگر جای دیگری رفته باشد)، `recordPhysicalReturn` (admin-only، فقط روی درخواست تأییدشده، کاملاً اطلاعاتی)، `getEmergencyCancelRequest` (مالکیت: ادمین هرکدام، پیک فقط خودش).
+- **Idempotency:** تکرار همان تصمیم روی یک درخواست پایانی = no-op بی‌اثر (بدون سفارش جایگزین دوم، بدون audit دوم)؛ تصمیم متناقض روی وضعیت پایانی = تعارض واقعی (`EMERGENCY_CANCEL_ALREADY_REVIEWED`).
+- **محیط تراکنش:** دقیقاً همان محدودیت `activateRun` (نیاز به replica set؛ بدون fallback غیرتراکنشی؛ خطای `Error` معمولی نه `AppError`). دو تابع کمکی `isDuplicateKeyError`/`isTransactionsUnsupportedError` از `deliveryRunService.ts` export شدند تا دوباره استفاده شوند (بدون انتزاع تراکنش دوم).
+- **مالی:** `isPaid`/زمان پرداخت هرگز به سفارش جایگزین کپی نمی‌شوند (سیستم فقط COD است؛ پولی برای اصلی هرگز گرفته نشده بود) — بدون سیستم پرداخت/بازپرداخت جدید.
+- **اولویت/انبار:** عمداً پیاده نشد؛ `replacesOrderId` به‌تنهایی برای شناسایی بعدی کافی است (طبق تصمیم).
+- **`cancelRun` عادی دست‌نخورده ماند** — همچنان بعد از هر pickup رد می‌شود؛ Emergency Cancel تنها مسیر بازیابی است.
+- **API:** `POST /api/v1/delivery-runs/[id]/emergency-cancel` (courier)، `GET /api/v1/emergency-cancel-requests/[id]`، `POST .../review`، `POST .../physical-return` (admin). الگوی `requireAuth`/`requireAdmin` + `parseJsonBody` + `apiResponse` موجود، بدون سبک جدید.
+- **Audit:** از `AuditLog` موجود استفاده شد (بدون مکانیزم دوم) — `action`های: `deliveryRun.emergency_cancel_requested/approved/rejected/physical_return_recorded`, `order.created_as_replacement`.
+
 ### تصمیم معماری: نوع وسیله (car/motorcycle) قابل‌تنظیم است، نه hard-code
 
 `RouteOptions.vehicleType?: VehicleType` (از enum مشترک `car|motorcycle|bicycle`) به رابط `RoutingProvider` اضافه شد. Business logic هیچ مقداری را ثابت نمی‌فرستد. `NeshanProvider.getRoute` این را به `type=car` یا `type=motorcycle` نگاشت می‌کند (Neshan بایسیکل ندارد → `bicycle` باعث `UNSUPPORTED_OPERATION` می‌شود، نه fallback خاموش). اگر caller چیزی ندهد، پیش‌فرض adapter (نه Business logic) اعمال می‌شود — برای Neshan `car`.
