@@ -462,6 +462,70 @@ describe("confirmPickup — Decision 2: an explicit, courier-only, physical-cust
     // (Rollback of the first stop's write is the real transaction's job — asserted in the integration test.)
   });
 
+  /** Mimics ONLY the driver contract: re-run the callback while the error carries TransientTransactionError. */
+  function retryingSession() {
+    return {
+      withTransaction: async (fn: () => Promise<void>) => {
+        for (;;) {
+          try {
+            return await fn();
+          } catch (e) {
+            if ((e as { errorLabels?: string[] }).errorLabels?.includes("TransientTransactionError")) continue;
+            throw e;
+          }
+        }
+      },
+      endSession: vi.fn(),
+    };
+  }
+  const transient = () => Object.assign(new Error("WriteConflict"), { code: 112, errorLabels: ["TransientTransactionError"] });
+
+  it("Decision 7 race: a retry whose originally intended stop was skipped by a winning skipStop REJECTS — never a successful count-0", async () => {
+    const run = makeRun([{ seq: 1 }]);
+    const afterSkip = { ...run, stops: run.stops.map((s) => ({ ...s, status: "skipped" })) }; // run still "active" here on purpose: multi-stop-shaped snapshot
+    m.runFindOne.mockResolvedValueOnce(run).mockResolvedValue(afterSkip);
+    m.startSession.mockResolvedValue(retryingSession());
+    m.orderUpdateOne.mockRejectedValueOnce(transient()); // lost the Order write conflict to skipStop
+    await expectAppError(confirmPickup(courier, run._id.toString()), "PICKUP_STOP_NO_LONGER_PENDING", 409);
+    expect(m.orderUpdateOne).toHaveBeenCalledTimes(1); // the retry never wrote anything
+  });
+
+  it("same race when the skip also completed the run (run no longer active on retry) → still rejects, not NOT_ACTIVE-then-success", async () => {
+    const run = makeRun([{ seq: 1 }]);
+    const completed = { ...run, status: "completed", stops: run.stops.map((s) => ({ ...s, status: "skipped" })) };
+    m.runFindOne.mockResolvedValueOnce(run).mockResolvedValue(completed);
+    m.startSession.mockResolvedValue(retryingSession());
+    m.orderUpdateOne.mockRejectedValueOnce(transient());
+    await expectAppError(confirmPickup(courier, run._id.toString()), "PICKUP_STOP_NO_LONGER_PENDING", 409);
+  });
+
+  it("race, multi-stop: if ANY originally intended stop vanished on retry the whole pickup rejects (all-or-nothing), even though another stop is still pending", async () => {
+    const run = makeRun([{ seq: 1 }, { seq: 2 }]);
+    const afterSkip = { ...run, stops: [{ ...run.stops[0]!, status: "skipped" }, run.stops[1]!] };
+    m.runFindOne.mockResolvedValueOnce(run).mockResolvedValue(afterSkip);
+    m.startSession.mockResolvedValue(retryingSession());
+    m.orderUpdateOne.mockRejectedValueOnce(transient());
+    await expectAppError(confirmPickup(courier, run._id.toString()), "PICKUP_STOP_NO_LONGER_PENDING", 409);
+  });
+
+  it("a retry caused by an unrelated transient error, with the intended stops still pending, still completes the pickup", async () => {
+    const run = makeRun([{ seq: 1 }]);
+    m.runFindOne.mockResolvedValue(run);
+    m.startSession.mockResolvedValue(retryingSession());
+    m.orderUpdateOne.mockRejectedValueOnce(transient()).mockResolvedValue({ modifiedCount: 1 });
+    expect((await confirmPickup(courier, run._id.toString())).pickedUpCount).toBe(1);
+  });
+
+  it("the intended work is fixed on attempt 1 and NOT recomputed on retry (a stop that became pending later is not picked up)", async () => {
+    const run = makeRun([{ seq: 1, status: "delivered" }, { seq: 2 }]);
+    const later = { ...run, stops: run.stops.map((s) => ({ ...s })) };
+    m.runFindOne.mockResolvedValueOnce(run).mockResolvedValue(later);
+    m.startSession.mockResolvedValue(retryingSession());
+    m.orderUpdateOne.mockRejectedValueOnce(transient()).mockResolvedValue({ modifiedCount: 1 });
+    expect((await confirmPickup(courier, run._id.toString())).pickedUpCount).toBe(1);
+    expect(m.orderUpdateOne.mock.calls.at(-1)![0]._id.equals(run.stops[1]!.orderId)).toBe(true);
+  });
+
   it("a repeat call whose orders are already this courier's picked_up is an idempotent no-op (count 0)", async () => {
     const run = makeRun([{ seq: 1 }]);
     m.runFindOne.mockResolvedValue(run);

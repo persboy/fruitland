@@ -253,10 +253,23 @@ describe("Decision 7 — skipStop / confirmPickup (real MongoDB transactions, re
     expect(!(stopStatus === "skipped" && delivery === "picked_up")).toBe(true);
     expect(!(stopStatus === "pending" && delivery === "unassigned")).toBe(true);
 
+    // Exactly one winner, exactly one loser — a losing confirmPickup may never "succeed" with 0.
     const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
     expect(fulfilled).toHaveLength(1);
-    const loser = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
-    expect(["ORDER_NOT_ASSIGNED", "DELIVERY_RUN_NOT_ACTIVE"]).toContain((loser.reason as { code: string }).code);
+    expect(rejected).toHaveLength(1);
+    const loserCode = (rejected[0]!.reason as { code: string }).code;
+    if (skipWon) {
+      // results[0] = skipStop, results[1] = confirmPickup
+      expect(results[0]!.status).toBe("fulfilled");
+      expect(results[1]!.status).toBe("rejected");
+      expect(loserCode).toBe("PICKUP_STOP_NO_LONGER_PENDING");
+    } else {
+      expect(results[1]!.status).toBe("fulfilled");
+      expect((results[1] as PromiseFulfilledResult<{ pickedUpCount: number }>).value.pickedUpCount).toBe(1);
+      expect(results[0]!.status).toBe("rejected");
+      expect(loserCode).toBe("ORDER_NOT_ASSIGNED");
+    }
     expect(skipCounter.executions + pickCounter.executions).toBeGreaterThanOrEqual(2);
   });
 

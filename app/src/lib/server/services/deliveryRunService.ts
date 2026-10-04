@@ -540,8 +540,21 @@ export async function confirmPickup(
   // aborts the whole transaction, so no partial pickup survives) and
   // race-safe against `skipStop` on the same order: both write the same
   // Order document, so MongoDB serialises them — see skipStop.
+  //
+  // The work this call INTENDS to do is fixed on the FIRST attempt (the
+  // pending stops that attempt's snapshot saw) and kept in this closure
+  // across `withTransaction` retries. A retry must NOT recompute "what is
+  // pending" from its fresh snapshot: if `skipStop` won the race, the
+  // intended stop is now skipped, and a recomputed (empty) list would let
+  // this call "succeed" with 0 — hiding that it lost. Instead every retry
+  // re-validates the originally intended stops and rejects if any of them
+  // is no longer pending in an active run. The only legitimate count-0
+  // success is the genuine idempotent repeat below (orders already
+  // picked_up by this courier BEFORE this call), which is decided per order
+  // from the order's own state, never from a vanished stop.
   let attempt = 0;
   let pickedUpCount = 0;
+  let intendedStopIds: Types.ObjectId[] | undefined;
   const session = await startSession();
   try {
     // NOTE: no try/catch inside this callback — a MongoDB write conflict
@@ -553,9 +566,28 @@ export async function confirmPickup(
       const run = await DeliveryRun.findOne({ _id: id, courierId: courierObjectId }).session(session).lean<RunRecord>();
       await hooks?.afterFirstRead?.({ attempt });
       if (!run) throw RUN_NOT_FOUND();
-      requireActiveRun(run);
 
-      const pending = run.stops.filter((s) => s.status === "pending").sort((a, b) => a.sequence - b.sequence);
+      if (intendedStopIds !== undefined) {
+        // Retry: the original intent must still be fully pending in an active run.
+        const gone = intendedStopIds.some((stopId) => {
+          const stop = run.stops.find((s) => s._id.equals(stopId));
+          return !stop || stop.status !== "pending";
+        });
+        if (run.status !== "active" || gone) {
+          throw AppError.conflict(
+            "توقف مورد نظر دیگر در انتظار نیست (در حین عملیات تغییر کرد)؛ تحویل‌گیری انجام نشد",
+            "PICKUP_STOP_NO_LONGER_PENDING",
+          );
+        }
+      } else {
+        requireActiveRun(run);
+        intendedStopIds = run.stops.filter((s) => s.status === "pending").map((s) => s._id);
+      }
+
+      const stopsById = new Map(run.stops.map((s) => [s._id.toString(), s]));
+      const pending = intendedStopIds
+        .map((stopId) => stopsById.get(stopId.toString())!)
+        .sort((a, b) => a.sequence - b.sequence);
       for (const stop of pending) {
         const result = await Order.updateOne(
           { _id: stop.orderId, "delivery.status": "assigned", "delivery.courierId": run.courierId },
