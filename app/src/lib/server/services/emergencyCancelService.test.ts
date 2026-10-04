@@ -257,6 +257,7 @@ describe("reviewEmergencyCancelRequest — approve path (transactional)", () => 
     deliveryFeeAmount: 1,
     totalAmount: 11,
     paymentMethod: "cod",
+    customerNote: "لطفاً زنگ نزنید، در بزنید",
   };
   const orderB = { _id: id() };
 
@@ -295,15 +296,42 @@ describe("reviewEmergencyCancelRequest — approve path (transactional)", () => 
     expect(pickedUpFilter).toMatchObject({ "delivery.status": "picked_up" });
     expect(pickedUpUpdate.$set["delivery.status"]).toBe("emergency_cancelled");
     const replacementInput = m.orderCreate.mock.calls[0]![0][0];
-    expect(replacementInput).toMatchObject({ orderNumber: "000123", replacesOrderId: orderA._id, userId: orderA.userId, totalAmount: orderA.totalAmount });
+    expect(replacementInput).toMatchObject({
+      orderNumber: "000123",
+      replacesOrderId: orderA._id,
+      userId: orderA.userId,
+      totalAmount: orderA.totalAmount,
+      customerNote: orderA.customerNote,
+    });
+    expect(pickedUpUpdate.$set["delivery.emergencyCancelledAt"]).toBeInstanceOf(Date);
 
     const [releasedFilter, releasedUpdate] = m.orderUpdateOne.mock.calls[0]!;
     expect(releasedFilter).toMatchObject({ _id: orderB._id, "delivery.status": "assigned" });
     expect(releasedUpdate.$set["delivery.status"]).toBe("unassigned");
+    // Releasing assigned->unassigned never sets emergencyCancelledAt — only the picked_up->emergency_cancelled path does.
+    expect(releasedUpdate.$set).not.toHaveProperty("delivery.emergencyCancelledAt");
 
     const everyOrderWrite = JSON.stringify([...m.orderFindOneAndUpdate.mock.calls, ...m.orderUpdateOne.mock.calls, ...m.orderCreate.mock.calls]);
     expect(everyOrderWrite).not.toContain("courierProfile");
     expect(Object.keys(replacementInput)).not.toContain("status");
+    expect(replacementInput).not.toHaveProperty("isPaid");
+    expect(replacementInput).not.toHaveProperty("_id");
+    expect(replacementInput).not.toHaveProperty("delivery");
+  });
+
+  it("does not fabricate a customerNote when the original order has none", async () => {
+    const req = pendingRequest();
+    arrange(req);
+    const orderWithoutNote = { ...orderA, customerNote: undefined };
+    m.orderFindOneAndUpdate.mockResolvedValueOnce(orderWithoutNote).mockResolvedValueOnce(null);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.getNextOrderNumber.mockResolvedValue("000124");
+    m.orderCreate.mockResolvedValue([{ _id: id() }]);
+    m.reqFindById.mockResolvedValueOnce(req).mockResolvedValueOnce({ ...req, status: "approved" });
+
+    await reviewEmergencyCancelRequest(admin, req._id.toString(), "approve");
+    const replacementInput = m.orderCreate.mock.calls[0]![0][0];
+    expect(replacementInput.customerNote).toBeUndefined();
   });
 
   it("leaves an order untouched if it already moved past assigned/picked_up by the time of the write (race-safety)", async () => {
@@ -393,36 +421,85 @@ describe("reviewEmergencyCancelRequest — approve path (transactional)", () => 
   });
 });
 
-describe("recordPhysicalReturn", () => {
+describe("recordPhysicalReturn — record-once, race-safe", () => {
   function approvedRequest() {
     return { _id: id(), deliveryRunId: runId, requestedByCourierId: courierId, reason: "r", status: "approved", requestedAt: new Date(), replacementOrderIds: [] };
   }
 
   it("only an admin may record physical return", async () => {
-    m.reqFindById.mockResolvedValue(approvedRequest());
     for (const actor of [courier, customer]) {
       await expectAppError(recordPhysicalReturn(actor, id().toString(), true), "FORBIDDEN_ROLE", 403);
     }
     expect(m.reqUpdateOne).not.toHaveBeenCalled();
   });
 
-  it("refuses when the request is not approved yet", async () => {
+  it("attempts the conditional write first (no findById-then-update race window)", async () => {
+    m.reqUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.reqFindById.mockResolvedValue({ ...approvedRequest(), physicalReturn: { returned: true, recordedByAdminUserId: adminId, recordedAt: new Date() } });
+    await recordPhysicalReturn(admin, id().toString(), true);
+    const [filter] = m.reqUpdateOne.mock.calls[0]!;
+    expect(filter).toMatchObject({ status: "approved", physicalReturn: { $exists: false } });
+  });
+
+  it("refuses when the request is not approved yet (still distinguished after the write fails to match)", async () => {
+    m.reqUpdateOne.mockResolvedValue({ modifiedCount: 0 });
     m.reqFindById.mockResolvedValue({ ...approvedRequest(), status: "pending" });
     await expectAppError(recordPhysicalReturn(admin, id().toString(), true), "EMERGENCY_CANCEL_NOT_APPROVED", 409);
-    expect(m.reqUpdateOne).not.toHaveBeenCalled();
+    expect(m.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the request does not exist", async () => {
+    m.reqUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+    m.reqFindById.mockResolvedValue(null);
+    await expectAppError(recordPhysicalReturn(admin, id().toString(), true), "EMERGENCY_CANCEL_REQUEST_NOT_FOUND", 404);
   });
 
   it.each([true, false])("records returned=%s and audits it, without touching the run or any order", async (returned) => {
     const req = approvedRequest();
-    m.reqFindById
-      .mockResolvedValueOnce(req)
-      .mockResolvedValueOnce({ ...req, physicalReturn: { returned, recordedByAdminUserId: adminId, recordedAt: new Date() } });
+    m.reqUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.reqFindById.mockResolvedValue({ ...req, physicalReturn: { returned, recordedByAdminUserId: adminId, recordedAt: new Date() } });
     const dto = await recordPhysicalReturn(admin, req._id.toString(), returned);
     expect(dto.physicalReturn?.returned).toBe(returned);
     expect(m.reqUpdateOne.mock.calls[0]![1].$set.physicalReturn).toMatchObject({ returned });
     expect(m.runUpdateOne).not.toHaveBeenCalled();
     expect(m.orderUpdateOne).not.toHaveBeenCalled();
     expect(m.auditCreate.mock.calls[0]![0]).toMatchObject({ action: "deliveryRun.emergency_cancel_physical_return_recorded" });
+  });
+
+  it("a second recording attempt is a real conflict, never overwrites the first, and creates no second audit entry", async () => {
+    const firstRecordedAt = new Date("2026-01-01T00:00:00.000Z");
+    const existing = { returned: true, recordedByAdminUserId: adminId, recordedAt: firstRecordedAt };
+    m.reqUpdateOne.mockResolvedValue({ modifiedCount: 0 }); // the $exists:false condition no longer matches
+    m.reqFindById.mockResolvedValue({ ...approvedRequest(), physicalReturn: existing });
+
+    const otherAdmin: AuthContext = { userId: id().toString(), role: "admin" };
+    await expectAppError(
+      recordPhysicalReturn(otherAdmin, id().toString(), false), // trying to flip it to false
+      "EMERGENCY_CANCEL_PHYSICAL_RETURN_ALREADY_RECORDED",
+      409,
+    );
+    expect(m.auditCreate).not.toHaveBeenCalled();
+    // The conditional update was attempted with the new (different) value, but it never matched —
+    // so nothing in the persisted `existing` record (returned/recordedByAdminUserId/recordedAt) was touched.
+    const [, attemptedUpdate] = m.reqUpdateOne.mock.calls[0]!;
+    expect(attemptedUpdate.$set.physicalReturn.returned).toBe(false);
+    expect(existing.returned).toBe(true); // unchanged — the attempted write never actually applied
+  });
+
+  it("concurrent recordings: only one can ever succeed, modeled as two sequential calls where the first wins", async () => {
+    // First call: the conditional update matches (physicalReturn was absent).
+    m.reqUpdateOne.mockResolvedValueOnce({ modifiedCount: 1 });
+    m.reqFindById.mockResolvedValueOnce({ ...approvedRequest(), physicalReturn: { returned: true, recordedByAdminUserId: adminId, recordedAt: new Date() } });
+    const first = await recordPhysicalReturn(admin, id().toString(), true);
+    expect(first.physicalReturn?.returned).toBe(true);
+    expect(m.auditCreate).toHaveBeenCalledTimes(1);
+
+    // Second (concurrent) call: by the time its conditional update runs, physicalReturn is no longer absent.
+    const otherAdmin: AuthContext = { userId: id().toString(), role: "admin" };
+    m.reqUpdateOne.mockResolvedValueOnce({ modifiedCount: 0 });
+    m.reqFindById.mockResolvedValueOnce({ ...approvedRequest(), physicalReturn: { returned: true, recordedByAdminUserId: adminId, recordedAt: new Date() } });
+    await expectAppError(recordPhysicalReturn(otherAdmin, id().toString(), false), "EMERGENCY_CANCEL_PHYSICAL_RETURN_ALREADY_RECORDED", 409);
+    expect(m.auditCreate).toHaveBeenCalledTimes(1); // still just the one, successful recording
   });
 });
 

@@ -183,6 +183,7 @@ function buildReplacementInput(original: IOrder & { _id: Types.ObjectId }) {
     deliveryFeeAmount: original.deliveryFeeAmount,
     totalAmount: original.totalAmount,
     paymentMethod: original.paymentMethod,
+    customerNote: original.customerNote,
     // Deliberately NOT copied: isPaid/paidAt. Under the project's current
     // COD-only model (Project Instructions §8), payment is collected in
     // cash at physical hand-off, which never happened for the original —
@@ -365,20 +366,34 @@ export async function reviewEmergencyCancelRequest(
  * admin recording a physical return implies goods existed to return, which
  * is only true once Emergency Cancel actually happened.
  */
+/**
+ * Record-once, race-safe: the write itself requires `physicalReturn` to
+ * still be absent (`$exists: false`), not a `findById` check followed by a
+ * separate write — two concurrent admins calling this at once can both pass
+ * a `findById` check, but only one's conditional `updateOne` can match, so
+ * exactly one recording ever wins. The loser never overwrites `returned`,
+ * `recordedByAdminUserId`, or `recordedAt`, and no second AuditLog entry is
+ * ever written for a request that already has a recording.
+ */
 export async function recordPhysicalReturn(actor: AuthContext, requestId: string, returned: boolean): Promise<EmergencyCancelRequestDto> {
   requireRole(actor, [...ADMIN_ROLES]);
   const id = toObjectId(requestId, REQUEST_NOT_FOUND);
   const adminId = toObjectId(actor.userId, invalidId);
-  const current = await DeliveryRunEmergencyCancelRequest.findById(id).lean<RequestRecord>();
-  if (!current) throw REQUEST_NOT_FOUND();
-  if (current.status !== "approved") {
-    throw AppError.conflict("ثبت بازگشت فیزیکی فقط برای درخواست تأییدشده ممکن است", "EMERGENCY_CANCEL_NOT_APPROVED");
-  }
   const now = new Date();
-  await DeliveryRunEmergencyCancelRequest.updateOne(
-    { _id: id },
+
+  const result = await DeliveryRunEmergencyCancelRequest.updateOne(
+    { _id: id, status: "approved", physicalReturn: { $exists: false } },
     { $set: { physicalReturn: { returned, recordedByAdminUserId: adminId, recordedAt: now } } },
   );
+  if (result.modifiedCount !== 1) {
+    const current = await DeliveryRunEmergencyCancelRequest.findById(id).lean<RequestRecord>();
+    if (!current) throw REQUEST_NOT_FOUND();
+    if (current.status !== "approved") {
+      throw AppError.conflict("ثبت بازگشت فیزیکی فقط برای درخواست تأییدشده ممکن است", "EMERGENCY_CANCEL_NOT_APPROVED");
+    }
+    // status is "approved" but the conditional write still didn't match: physicalReturn already exists.
+    throw AppError.conflict("بازگشت فیزیکی قبلاً ثبت شده و قابل تغییر نیست", "EMERGENCY_CANCEL_PHYSICAL_RETURN_ALREADY_RECORDED");
+  }
   await AuditLog.create({
     actorUserId: adminId,
     action: "deliveryRun.emergency_cancel_physical_return_recorded",

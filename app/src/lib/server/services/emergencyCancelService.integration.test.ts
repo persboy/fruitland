@@ -27,7 +27,7 @@ import { getEmergencyCancelRequest, recordPhysicalReturn, requestEmergencyCancel
  */
 const address = { recipientName: "Ali", phone: "09120000000", province: "Zanjan", city: "Zanjan", addressLine: "Same St. 1", location: { lat: 36.68, lng: 48.5 } };
 
-async function makeOrder(n: number) {
+async function makeOrder(n: number, overrides: Record<string, unknown> = {}) {
   return Order.create({
     orderNumber: `orig-${n}`,
     userId: new Types.ObjectId(),
@@ -35,6 +35,7 @@ async function makeOrder(n: number) {
     deliveryAddress: address,
     subtotalAmount: 2000,
     totalAmount: 2000,
+    ...overrides,
   });
 }
 
@@ -63,8 +64,14 @@ describe("Emergency Cancel (integration, replica set)", () => {
   }
 
   it("full happy path: request -> approve -> run cancelled, order emergency_cancelled, replacement created with full items and new number", async () => {
-    const { orders, run } = await seedActiveRunWithPickup(1);
-    const original = orders[0]!;
+    const adminDoc = await User.create({ phone: "09120000001", role: "admin" });
+    const courierDoc = await User.create({ phone: "09120000002", role: "courier", courierProfile: { vehicleType: "motorcycle" } });
+    admin = { userId: adminDoc._id.toString(), role: "admin" };
+    courier = { userId: courierDoc._id.toString(), role: "courier" };
+    const original = await makeOrder(1, { customerNote: "لطفاً زنگ نزنید" });
+    const draft = await createDraftRun(admin, { courierId: courier.userId, orderIds: [original._id.toString()] });
+    const run = await activateRun(admin, draft.id);
+    await confirmPickup(courier, run.id);
 
     const request = await requestEmergencyCancel(courier, run.id, "پیک تصادف کرد و کالا آسیب دید");
     expect(request.status).toBe("pending");
@@ -92,11 +99,21 @@ describe("Emergency Cancel (integration, replica set)", () => {
     expect(replacement?.delivery.status).toBe("unassigned");
     expect(replacement?.status).toBe("preparing"); // normal default, Emergency Cancel invents no transition for it
     expect(replacement?.isPaid).toBe(false); // no new payment obligation created
+    expect(replacement?.customerNote).toBe("لطفاً زنگ نزنید"); // preserved customer content
 
     const audits = await AuditLog.find({ entityId: { $in: [request.id, replacement!._id] } }).lean();
     expect(audits.some((a) => a.action === "deliveryRun.emergency_cancel_requested")).toBe(true);
     expect(audits.some((a) => a.action === "deliveryRun.emergency_cancel_approved")).toBe(true);
     expect(audits.some((a) => a.action === "order.created_as_replacement")).toBe(true);
+  });
+
+  it("does not fabricate a customerNote when the original order has none", async () => {
+    const { orders, run } = await seedActiveRunWithPickup(1);
+    expect(orders[0]!.customerNote).toBeUndefined();
+    const request = await requestEmergencyCancel(courier, run.id, "دلیل");
+    const reviewed = await reviewEmergencyCancelRequest(admin, request.id, "approve");
+    const replacement = await Order.findById(reviewed.replacementOrderIds[0]);
+    expect(replacement?.customerNote).toBeUndefined();
   });
 
   it("rejection leaves everything unchanged and allows a later new request", async () => {
@@ -151,6 +168,42 @@ describe("Emergency Cancel (integration, replica set)", () => {
     const recorded = await recordPhysicalReturn(admin, reviewed.id, false);
     expect(recorded.physicalReturn).toMatchObject({ returned: false });
     expect((await DeliveryRun.findById(run.id))?.status).toBe("cancelled"); // still cancelled, not reopened
+  });
+
+  it("physical return is record-once: a second attempt is a real conflict and never overwrites the first recording", async () => {
+    const { run } = await seedActiveRunWithPickup(1);
+    const request = await requestEmergencyCancel(courier, run.id, "دلیل");
+    const reviewed = await reviewEmergencyCancelRequest(admin, request.id, "approve");
+
+    const first = await recordPhysicalReturn(admin, reviewed.id, true);
+    expect(first.physicalReturn?.returned).toBe(true);
+
+    await expect(recordPhysicalReturn(admin, reviewed.id, false)).rejects.toMatchObject({
+      code: "EMERGENCY_CANCEL_PHYSICAL_RETURN_ALREADY_RECORDED",
+    });
+
+    const stillUnchanged = await DeliveryRunEmergencyCancelRequest.findById(reviewed.id).lean();
+    expect(stillUnchanged?.physicalReturn?.returned).toBe(true); // not flipped to false by the second attempt
+    expect(stillUnchanged?.physicalReturn?.recordedAt?.getTime()).toBe(first.physicalReturn ? new Date(first.physicalReturn.recordedAt).getTime() : undefined);
+  });
+
+  it("two truly concurrent physical-return writes: exactly one succeeds, enforced by the database (not application logic alone)", async () => {
+    const { run } = await seedActiveRunWithPickup(1);
+    const request = await requestEmergencyCancel(courier, run.id, "دلیل");
+    const reviewed = await reviewEmergencyCancelRequest(admin, request.id, "approve");
+
+    const otherAdminDoc = await User.create({ phone: "09120000005", role: "admin" });
+    const otherAdmin: AuthContext = { userId: otherAdminDoc._id.toString(), role: "admin" };
+
+    const results = await Promise.allSettled([
+      recordPhysicalReturn(admin, reviewed.id, true),
+      recordPhysicalReturn(otherAdmin, reviewed.id, false),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "EMERGENCY_CANCEL_PHYSICAL_RETURN_ALREADY_RECORDED" });
   });
 
   it("ordinary cancelRun still refuses once pickup has happened — Emergency Cancel is the only recovery path", async () => {

@@ -388,6 +388,11 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **مالی:** `isPaid`/زمان پرداخت هرگز به سفارش جایگزین کپی نمی‌شوند (سیستم فقط COD است؛ پولی برای اصلی هرگز گرفته نشده بود) — بدون سیستم پرداخت/بازپرداخت جدید.
 - **اولویت/انبار:** عمداً پیاده نشد؛ `replacesOrderId` به‌تنهایی برای شناسایی بعدی کافی است (طبق تصمیم).
 - **`cancelRun` عادی دست‌نخورده ماند** — همچنان بعد از هر pickup رد می‌شود؛ Emergency Cancel تنها مسیر بازیابی است.
+
+**به‌روزرسانی تصحیحی (همین فاز):**
+- **`customerNote`** اکنون به سفارش جایگزین کپی می‌شود (قبلاً جا افتاده بود)؛ اگر اصلی نداشته باشد، جعل نمی‌شود (می‌ماند `undefined`).
+- **`recordPhysicalReturn` اکنون واقعاً record-once و race-safe است.** قبلاً می‌شد آن را بازنویسی کرد؛ اکنون نوشتن اتمیک و شرطی است (`physicalReturn:{$exists:false}` در خودِ `updateOne`، نه خواندن-سپس-نوشتن) — حتی دو ادمین هم‌زمان هم فقط یکی موفق می‌شوند. تلاش دوم خطای `EMERGENCY_CANCEL_PHYSICAL_RETURN_ALREADY_RECORDED` (409) می‌گیرد و هیچ‌چیز از ثبت اول (نه `returned`، نه `recordedByAdminUserId`، نه `recordedAt`) تغییر نمی‌کند؛ بدون audit دوم.
+- **تست یکپارچه‌ی واقعی اجرا شد (تا جایی که محیط اجازه داد):** تلاش برای `npm run test:integration` نشان داد باینری MongoDB در این sandbox قابل دانلود نیست (`fastdl.mongodb.org` → 403) — این محدودیت واقعی محیط است، نه ادعای بدون آزمایش؛ باید در CI واقعی اجرا و تأیید شود.
 - **API:** `POST /api/v1/delivery-runs/[id]/emergency-cancel` (courier)، `GET /api/v1/emergency-cancel-requests/[id]`، `POST .../review`، `POST .../physical-return` (admin). الگوی `requireAuth`/`requireAdmin` + `parseJsonBody` + `apiResponse` موجود، بدون سبک جدید.
 - **Audit:** از `AuditLog` موجود استفاده شد (بدون مکانیزم دوم) — `action`های: `deliveryRun.emergency_cancel_requested/approved/rejected/physical_return_recorded`, `order.created_as_replacement`.
 
