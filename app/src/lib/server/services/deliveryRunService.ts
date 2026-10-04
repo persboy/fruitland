@@ -95,8 +95,9 @@ export function toDeliveryRunDto(run: RunRecord): DeliveryRunDto {
 }
 
 /**
- * Optional, caller-supplied observation/synchronisation point for the two
- * transactional courier operations (`confirmPickup`, `skipStop`). Production
+ * Optional, caller-supplied observation/synchronisation point for the
+ * transactional operations `confirmPickup`, `skipStop` and (Decision 8,
+ * active run) `cancelRun`. Production
  * callers never pass it, so it has no effect there and carries no business
  * rule. `afterFirstRead` is invoked once per EXECUTION of the transaction
  * callback — i.e. again on every `withTransaction` retry, with an
@@ -216,15 +217,6 @@ function transactionsUnsupportedError(cause: unknown): Error {
     "این عملیات به یک تراکنش چندسندی MongoDB نیاز دارد که این استقرار (mongod مستقل، نه replica set/mongos) از آن پشتیبانی نمی‌کند. " +
       "برای این عملیات، MongoDB باید به‌صورت replica set (یا mongos) پیکربندی شود.",
     { cause },
-  );
-}
-
-/** Returns the released order ids' effect only; safe to call for orders that already moved on (they simply don't match). */
-async function releaseOrders(orderIds: Types.ObjectId[], courierId: Types.ObjectId): Promise<void> {
-  if (orderIds.length === 0) return;
-  await Order.updateMany(
-    { _id: { $in: orderIds }, "delivery.status": "assigned", "delivery.courierId": courierId },
-    { $set: { "delivery.status": "unassigned" }, $unset: { "delivery.courierId": 1, "delivery.assignedAt": 1 } },
   );
 }
 
@@ -468,39 +460,120 @@ export async function activateRun(actor: AuthContext, runId: string): Promise<De
 
 /**
  * A draft is discarded, not "released" — it never reserved anything, so
- * `Order.delivery` is never touched. An active run's cancellation is
- * separate and still subject to the existing order-state rule below.
+ * `Order.delivery` is never touched (non-transactional, single-document
+ * conditional write).
+ *
+ * Decision 8 — cancelling an ACTIVE run is ONE real MongoDB transaction
+ * (`startSession` + `withTransaction`, no manual retry, no try/catch inside
+ * the callback so a TransientTransactionError reaches `withTransaction`
+ * untouched). Every read and write below uses the transaction's session, and
+ * the cancellation decision is made only from reads inside it:
+ *
+ *   1. read the run (session); must still be `active`
+ *   2. relevant stops = every stop that is NOT `skipped`. A skipped stop's
+ *      order was released (Decision 7: assigned → unassigned) and may even be
+ *      assigned elsewhere now; it neither blocks cancellation nor is touched.
+ *      Pending, delivered and failed stops are all relevant: their orders
+ *      must still be `assigned`, otherwise (picked up or beyond)
+ *      cancellation is rejected with RUN_HAS_PICKED_UP_ORDERS
+ *      (Decision 6: Emergency Cancel is the separate post-pickup path).
+ *   3. claim the run document (conditional on `active`) — `skipStop` writes
+ *      the same document, so cancel-vs-skip conflicts here
+ *   4. release EVERY relevant order with a conditional write
+ *      (`assigned` + this run's courier) and require modifiedCount to equal
+ *      the number expected — because cancel WRITES each order it checked,
+ *      a concurrent `confirmPickup` of the same order is a write conflict:
+ *      one side retries on a fresh snapshot, so a stale check can never
+ *      commit "run cancelled + order picked_up". A mismatch aborts and rolls
+ *      back everything (no compensation; a crash also rolls back).
+ *
+ * No AuditLog (Owner Decision 2 of Decision 8). Repeated/concurrent
+ * cancellation keeps the existing conflict contract (INVALID_RUN_TRANSITION),
+ * it is not an idempotent success. `Order.status` is never touched.
  */
-export async function cancelRun(actor: AuthContext, runId: string): Promise<DeliveryRunDto> {
+export async function cancelRun(actor: AuthContext, runId: string, hooks?: TransactionHooks): Promise<DeliveryRunDto> {
   requireRole(actor, [...ADMIN_ROLES]);
   const id = toObjectId(runId, RUN_NOT_FOUND);
-  const run = await DeliveryRun.findById(id).lean<RunRecord>();
-  if (!run) throw RUN_NOT_FOUND();
-  if (!canTransitionDeliveryRun(run.status, "cancelled")) {
+  const cancelledByUserId = toObjectId(actor.userId, RUN_NOT_FOUND);
+
+  // Branch selection only. Draft cancel is decided by its own conditional
+  // write; terminal states (cancelled/completed) never revert, so rejecting
+  // them here is safe. An ACTIVE run's cancellation is re-decided inside the
+  // transaction from transactional reads.
+  const probe = await DeliveryRun.findById(id).lean<RunRecord>();
+  if (!probe) throw RUN_NOT_FOUND();
+  if (!canTransitionDeliveryRun(probe.status, "cancelled")) {
     throw AppError.conflict("این ماموریت قابل لغو نیست", "INVALID_RUN_TRANSITION");
   }
 
-  if (run.status === "draft") {
+  if (probe.status === "draft") {
     const result = await DeliveryRun.updateOne(
       { _id: id, status: "draft" },
-      { $set: { status: "cancelled", cancelledAt: new Date(), cancelledByUserId: toObjectId(actor.userId, RUN_NOT_FOUND) } },
+      { $set: { status: "cancelled", cancelledAt: new Date(), cancelledByUserId } },
     );
     if (result.modifiedCount !== 1) throw AppError.conflict("وضعیت ماموریت تغییر کرد", "DELIVERY_RUN_CHANGED");
     return freshDto(id);
   }
 
-  // run.status === "active" from here (draft/active are the only transitions canTransitionDeliveryRun allows into "cancelled").
-  const orderIds = run.stops.map((s) => s.orderId);
-  const beyondAssigned = await Order.countDocuments({ _id: { $in: orderIds }, "delivery.status": { $ne: "assigned" } });
-  if (beyondAssigned > 0) {
-    throw AppError.conflict("بخشی از سفارش‌ها تحویل پیک شده‌اند؛ لغو ماموریت مجاز نیست", "RUN_HAS_PICKED_UP_ORDERS");
+  let attempt = 0;
+  const session = await startSession();
+  try {
+    await session.withTransaction(async () => {
+      attempt += 1;
+      // 1. The decision is made from a read through the transaction's session.
+      const run = await DeliveryRun.findOne({ _id: id }).session(session).lean<RunRecord>();
+      await hooks?.afterFirstRead?.({ attempt });
+      if (!run) throw RUN_NOT_FOUND();
+      if (!canTransitionDeliveryRun(run.status, "cancelled")) {
+        throw AppError.conflict("این ماموریت قابل لغو نیست", "INVALID_RUN_TRANSITION");
+      }
+      if (run.status !== "active") {
+        throw AppError.conflict("وضعیت ماموریت تغییر کرد", "DELIVERY_RUN_CHANGED");
+      }
+
+      // 2. Relevant stops: everything except skipped.
+      const orderIds = run.stops.filter((s) => s.status !== "skipped").map((s) => s.orderId);
+      if (orderIds.length > 0) {
+        const beyondAssigned = await Order.countDocuments(
+          { _id: { $in: orderIds }, "delivery.status": { $ne: "assigned" } },
+          { session },
+        );
+        if (beyondAssigned > 0) {
+          throw AppError.conflict("بخشی از سفارش‌ها تحویل پیک شده‌اند؛ لغو ماموریت مجاز نیست", "RUN_HAS_PICKED_UP_ORDERS");
+        }
+      }
+
+      // 3. Claim the run document (shared with embedded stops → conflicts with skipStop).
+      const claim = await DeliveryRun.updateOne(
+        { _id: run._id, status: "active" },
+        { $set: { status: "cancelled", cancelledAt: new Date(), cancelledByUserId } },
+        { session },
+      );
+      if (claim.modifiedCount !== 1) {
+        throw AppError.conflict("وضعیت ماموریت تغییر کرد", "DELIVERY_RUN_CHANGED");
+      }
+
+      // 4. Release every checked order (conditional write → conflicts with confirmPickup); all or nothing.
+      if (orderIds.length > 0) {
+        const release = await Order.updateMany(
+          { _id: { $in: orderIds }, "delivery.status": "assigned", "delivery.courierId": run.courierId },
+          { $set: { "delivery.status": "unassigned" }, $unset: { "delivery.courierId": 1, "delivery.assignedAt": 1 } },
+          { session },
+        );
+        if (release.modifiedCount !== orderIds.length) {
+          throw AppError.conflict(
+            "آزادسازی سفارش‌های ماموریت کامل نشد؛ لغو انجام نشد",
+            "RUN_ORDER_RELEASE_MISMATCH",
+          );
+        }
+      }
+    });
+  } catch (error) {
+    if (isTransactionsUnsupportedError(error)) throw transactionsUnsupportedError(error);
+    throw error;
+  } finally {
+    await session.endSession();
   }
-  const result = await DeliveryRun.updateOne(
-    { _id: id, status: "active" },
-    { $set: { status: "cancelled", cancelledAt: new Date(), cancelledByUserId: toObjectId(actor.userId, RUN_NOT_FOUND) } },
-  );
-  if (result.modifiedCount !== 1) throw AppError.conflict("وضعیت ماموریت تغییر کرد", "DELIVERY_RUN_CHANGED");
-  await releaseOrders(orderIds, run.courierId);
   return freshDto(id);
 }
 

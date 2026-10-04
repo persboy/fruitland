@@ -150,6 +150,16 @@ shipped   → returned
 - **AuditLog:** `deliveryRun.stop_skipped` (`entityType: DeliveryRun`)، داخل همان تراکنش؛ abort ⇒ rollback.
 - **Decision 7 فریز نیست:** تأیید با تراکنش واقعی MongoDB (replica set) هنوز اجرا نشده است (CLAUDE.md).
 
+**Phase 14 — Decision 8 (تصمیم‌گرفته‌شده؛ پیاده‌سازی کامل، تأیید تراکنشی/هم‌روندی در انتظار): `cancelRun` فعال تراکنشی و هم‌روندامن است**
+
+- **`cancelRun` روی run فعال یک تراکنش واقعی است** (`startSession` + `withTransaction`، همان الگوی `activateRun/confirmPickup/skipStop`؛ بدون retry دستی، بدون compensation). مسیر draft همچنان غیرتراکنشی است. تصمیم لغو فقط از خواندن‌های داخل تراکنش گرفته می‌شود.
+- **مجموعه‌ی Stop مرتبط = همه‌ی Stopهای غیر `skipped`.** سفارش Stop `skipped` (که طبق Decision 7 `unassigned` است) نه شمرده می‌شود و نه آزاد (یا لمس) می‌شود، پس هرگز مانع لغو نیست و دست‌نخورده می‌ماند. Stopهای `pending`، `delivered` و `failed` مرتبط‌اند: سفارششان باید هنوز `assigned` باشد وگرنه (pickup انجام شده یا فراتر) لغو عادی با `RUN_HAS_PICKED_UP_ORDERS` (409) رد می‌شود (Decision 6؛ Emergency Cancel مسیر جدای بعد از pickup می‌ماند).
+- **ترتیب نوشتن:** خواندن Run (session) ← بررسی Orderها (session) ← claim شرطی سند Run (`status:"active"`) ← آزادسازی شرطی همه‌ی Orderهای بررسی‌شده (`delivery.status=assigned` و `delivery.courierId` همان Run) و تطبیق `modifiedCount` با تعداد مورد انتظار؛ عدم تطابق ⇒ `RUN_ORDER_RELEASE_MISMATCH` (409) و rollback کامل. هیچ AuditLog، `Order.status` یا Stop نوشته نمی‌شود.
+- **هم‌روندی:** *cancel در برابر `confirmPickup`:* cancel همان Orderهایی را می‌نویسد که چک کرده، پس pickup هم‌زمان روی همان سند Order conflict می‌دهد و بازنده روی snapshot تازه retry می‌شود. pickup برنده ⇒ cancel `RUN_HAS_PICKED_UP_ORDERS`؛ cancel برنده ⇒ pickup `PICKUP_STOP_NO_LONGER_PENDING`. حالت `cancelled + picked_up` ناشی از چک کهنه ممکن نیست. *cancel در برابر `skipStop`:* هر دو سند Run را می‌نویسند (Stop embedded) ⇒ conflict؛ skip برنده ⇒ run `completed` (اگر آخرین Stop) و cancel `INVALID_RUN_TRANSITION`، یا اگر Stop pending دیگری مانده cancel بر snapshot تازه موفق می‌شود؛ cancel برنده ⇒ skip `DELIVERY_RUN_NOT_ACTIVE` بدون هیچ نوشتن. *cancel در برابر cancel:* یکی موفق، دیگری `INVALID_RUN_TRANSITION` (قرارداد موجود؛ no-op موفق نیست)، آزادسازی دوباره ندارد. *crash:* تراکنش rollback می‌شود؛ پنجره‌ی «run لغو و سفارش هنوز assigned» حذف شد.
+- **مجوز بدون تغییر:** `admin | master_admin`. تغییری در `confirmPickup`، `skipStop`، Emergency Cancel، `proposeStopOutcome` یا `reorderStops` داده نشد.
+- **محیط:** مانند `activateRun`، روی استقرار standalone (بدون replica set) `cancelRun` فعال همان `Error` عادیِ «نیاز به replica set» را می‌دهد (نه `AppError`)؛ draft بی‌تأثیر است.
+- **Decision 8 فریز نیست:** تست‌های replica-set (`deliveryRunService.cancel.integration.test.ts`) نوشته شدند ولی اجرا نشدند (CLAUDE.md).
+
 ### DeliveryRunEmergencyCancelRequest (Phase 14 — Emergency Cancel)
 
 مکانیزم بازیابی صریح برای یک `DeliveryRun` فعال که حداقل یک سفارش آن `pickedUp` شده — دقیقاً جایی که `cancelRun` عادی عمداً رد می‌کند (`RUN_HAS_PICKED_UP_ORDERS`). سطح run است، نه سطح سفارش/آیتم (این یک فروشگاه میوه است؛ تحویل جزئی مدل نمی‌شود).

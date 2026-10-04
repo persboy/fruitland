@@ -404,22 +404,181 @@ describe("cancelRun", () => {
     expect(m.orderCount).not.toHaveBeenCalled();
   });
 
-  it("cancelling an ACTIVE run refuses once any order has been picked up, and releases nothing", async () => {
+  // ---- Decision 8: active cancelRun is one transaction; decision made from session reads ----
+  const activeCancelSetup = (run: ReturnType<typeof makeRun>) => {
+    m.runFindById.mockResolvedValue(run); // branch probe only
+    m.runFindOne.mockResolvedValue(run); // transactional read
+    m.startSession.mockResolvedValue(fakeSession());
+  };
+
+  it("D8 #1: active run, assigned orders, none picked up → run cancelled, each relevant order released in the transaction", async () => {
     const run = makeRun([{ seq: 1 }, { seq: 2 }], "active");
-    m.runFindById.mockResolvedValue(run);
+    activeCancelSetup(run);
+    m.orderCount.mockResolvedValue(0);
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.orderUpdateMany.mockResolvedValue({ modifiedCount: 2 });
+    await cancelRun(admin, run._id.toString());
+    expect(m.startSession).toHaveBeenCalledTimes(1);
+    expect(m.runUpdateOne.mock.calls[0]![0]).toMatchObject({ _id: run._id, status: "active" });
+    expect(m.runUpdateOne.mock.calls[0]![2]).toHaveProperty("session");
+    const [filter, update, options] = m.orderUpdateMany.mock.calls[0]!;
+    expect(filter).toMatchObject({ "delivery.status": "assigned", "delivery.courierId": courierId });
+    expect(filter._id.$in).toHaveLength(2);
+    expect(update.$set).toEqual({ "delivery.status": "unassigned" });
+    expect(options).toHaveProperty("session");
+    expect(m.orderCount.mock.calls[0]![1]).toHaveProperty("session");
+    expect(m.auditCreate).not.toHaveBeenCalled(); // Owner decision: no AuditLog on cancelRun
+  });
+
+  it("D8 #2: active run with a picked-up order → RUN_HAS_PICKED_UP_ORDERS; run not claimed, nothing released", async () => {
+    const run = makeRun([{ seq: 1 }, { seq: 2 }], "active");
+    activeCancelSetup(run);
     m.orderCount.mockResolvedValue(1);
     await expectAppError(cancelRun(admin, run._id.toString()), "RUN_HAS_PICKED_UP_ORDERS", 409);
     expect(m.runUpdateOne).not.toHaveBeenCalled();
     expect(m.orderUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("cancelling an ACTIVE run releases assignments that were never picked up", async () => {
-    const run = makeRun([{ seq: 1 }], "active");
-    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "cancelled" });
+  it("D8 #3: a SKIPPED stop is ignored — its order is neither checked nor released; cancellation succeeds", async () => {
+    const run = makeRun([{ seq: 1, status: "skipped" }, { seq: 2 }], "active");
+    activeCancelSetup(run);
     m.orderCount.mockResolvedValue(0);
     m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.orderUpdateMany.mockResolvedValue({ modifiedCount: 1 });
     await cancelRun(admin, run._id.toString());
+    const skippedOrderId = run.stops[0]!.orderId;
+    const pendingOrderId = run.stops[1]!.orderId;
+    const countIds = m.orderCount.mock.calls[0]![0]._id.$in as Types.ObjectId[];
+    const releaseIds = m.orderUpdateMany.mock.calls[0]![0]._id.$in as Types.ObjectId[];
+    for (const ids of [countIds, releaseIds]) {
+      expect(ids.map(String)).toEqual([pendingOrderId.toString()]);
+      expect(ids.map(String)).not.toContain(skippedOrderId.toString());
+    }
     expect(m.orderUpdateMany.mock.calls[0]![0]).toMatchObject({ "delivery.status": "assigned" });
+    // the stop itself is never rewritten by cancel (only the run status is $set)
+    expect(Object.keys(m.runUpdateOne.mock.calls[0]![1].$set).sort()).toEqual(["cancelledAt", "cancelledByUserId", "status"]);
+  });
+
+  it("D8: delivered/failed stops stay relevant (their order is past assigned) → still rejected, existing policy preserved", async () => {
+    const run = makeRun([{ seq: 1, status: "delivered" }, { seq: 2 }], "active");
+    activeCancelSetup(run);
+    m.orderCount.mockResolvedValue(1);
+    await expectAppError(cancelRun(admin, run._id.toString()), "RUN_HAS_PICKED_UP_ORDERS", 409);
+    expect(m.orderCount.mock.calls[0]![0]._id.$in).toHaveLength(2);
+  });
+
+  it("D8 #4: release mismatch throws and the transaction is aborted (the callback's error propagates; no compensation write)", async () => {
+    const run = makeRun([{ seq: 1 }, { seq: 2 }], "active");
+    activeCancelSetup(run);
+    m.orderCount.mockResolvedValue(0);
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.orderUpdateMany.mockResolvedValue({ modifiedCount: 1 }); // expected 2
+    const session = { withTransaction: vi.fn(async (fn: () => Promise<void>) => fn()), endSession: vi.fn() };
+    m.startSession.mockResolvedValue(session);
+    await expectAppError(cancelRun(admin, run._id.toString()), "RUN_ORDER_RELEASE_MISMATCH", 409);
+    expect(session.endSession).toHaveBeenCalled();
+    // rollback is MongoDB's job (withTransaction aborts on throw); the service performs no undo write
+    expect(m.runUpdateOne).toHaveBeenCalledTimes(1);
+    expect(m.orderUpdateMany).toHaveBeenCalledTimes(1);
+    expect(m.orderUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("D8: the run is claimed with an `active` condition; losing that claim throws DELIVERY_RUN_CHANGED before any order is written", async () => {
+    const run = makeRun([{ seq: 1 }], "active");
+    activeCancelSetup(run);
+    m.orderCount.mockResolvedValue(0);
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+    await expectAppError(cancelRun(admin, run._id.toString()), "DELIVERY_RUN_CHANGED", 409);
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("D8: decision is re-made inside the transaction — a retry that now sees a picked-up order rejects (no cancellation)", async () => {
+    const run = makeRun([{ seq: 1 }], "active");
+    m.runFindById.mockResolvedValue(run);
+    m.runFindOne.mockResolvedValue(run);
+    const transient = Object.assign(new Error("WriteConflict"), { code: 112, errorLabels: ["TransientTransactionError"] });
+    m.orderCount.mockResolvedValueOnce(0).mockResolvedValue(1); // attempt 1: all assigned; attempt 2: pickup committed
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.orderUpdateMany.mockRejectedValueOnce(transient);
+    m.startSession.mockResolvedValue({
+      withTransaction: async (fn: () => Promise<void>) => {
+        try {
+          await fn();
+        } catch (e) {
+          if ((e as { errorLabels?: string[] }).errorLabels?.includes("TransientTransactionError")) return fn();
+          throw e;
+        }
+      },
+      endSession: vi.fn(),
+    });
+    await expectAppError(cancelRun(admin, run._id.toString()), "RUN_HAS_PICKED_UP_ORDERS", 409);
+    expect(m.orderCount).toHaveBeenCalledTimes(2);
+  });
+
+  it("D8: the optional hook fires once per transaction execution, after the first session read and before any write", async () => {
+    const run = makeRun([{ seq: 1 }], "active");
+    activeCancelSetup(run);
+    m.orderCount.mockResolvedValue(0);
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.orderUpdateMany.mockResolvedValue({ modifiedCount: 1 });
+    const seen: Array<{ attempt: number; writesSoFar: number }> = [];
+    await cancelRun(admin, run._id.toString(), {
+      afterFirstRead: ({ attempt }) => {
+        seen.push({ attempt, writesSoFar: m.runUpdateOne.mock.calls.length + m.orderUpdateMany.mock.calls.length });
+      },
+    });
+    expect(seen).toEqual([{ attempt: 1, writesSoFar: 0 }]);
+  });
+
+  it("D8: unsupported-transaction deployments surface the existing plain Error (not AppError) for an ACTIVE run", async () => {
+    const run = makeRun([{ seq: 1 }], "active");
+    m.runFindById.mockResolvedValue(run);
+    const err = Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 });
+    m.startSession.mockResolvedValue({ withTransaction: async () => { throw err; }, endSession: vi.fn() });
+    await expect(cancelRun(admin, run._id.toString())).rejects.not.toMatchObject({ name: "AppError" });
+    expect(m.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("D8: a DRAFT cancel stays non-transactional", async () => {
+    const run = makeRun([{ seq: 1 }], "draft");
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "cancelled" });
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    await cancelRun(admin, run._id.toString());
+    expect(m.startSession).not.toHaveBeenCalled();
+  });
+
+  it("D8 #5: repeated cancellation → existing INVALID_RUN_TRANSITION; nothing released twice", async () => {
+    const run = makeRun([{ seq: 1 }], "cancelled");
+    m.runFindById.mockResolvedValue(run);
+    await expectAppError(cancelRun(admin, run._id.toString()), "INVALID_RUN_TRANSITION", 409);
+    expect(m.startSession).not.toHaveBeenCalled();
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+    expect(m.runUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("D8: a transactional re-read that finds the run already cancelled (concurrent cancel won) → INVALID_RUN_TRANSITION, no release", async () => {
+    const run = makeRun([{ seq: 1 }], "active");
+    m.runFindById.mockResolvedValue(run);
+    m.runFindOne.mockResolvedValue({ ...run, status: "cancelled" });
+    m.startSession.mockResolvedValue(fakeSession());
+    await expectAppError(cancelRun(admin, run._id.toString()), "INVALID_RUN_TRANSITION", 409);
+    expect(m.runUpdateOne).not.toHaveBeenCalled();
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("D8 #6: authorization unchanged — admin and master_admin may cancel; courier, customer and unknown roles are rejected before any DB access", async () => {
+    const run = makeRun([{ seq: 1 }], "draft");
+    for (const role of ["admin", "master_admin"] as const) {
+      vi.resetAllMocks();
+      m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "cancelled" });
+      m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      await expect(cancelRun({ userId: adminId.toString(), role }, run._id.toString())).resolves.toBeDefined();
+    }
+    for (const actor of [courier, customer]) {
+      vi.resetAllMocks();
+      await expectAppError(cancelRun(actor, id().toString()), "FORBIDDEN_ROLE", 403);
+      noDbTouched();
+    }
   });
 
   it("cannot cancel a completed run", async () => {
@@ -752,8 +911,11 @@ describe("Decision 3 (approved, Option F): DeliveryRun never mutates Order.statu
       async () => {
         const run = makeRun([{ seq: 1 }], "active");
         m.runFindById.mockResolvedValue(run);
+        m.runFindOne.mockResolvedValue(run);
+        m.startSession.mockResolvedValue(fakeSession());
         m.orderCount.mockResolvedValue(0);
         m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+        m.orderUpdateMany.mockResolvedValue({ modifiedCount: 1 });
         return cancelRun(admin, run._id.toString());
       },
     ];
