@@ -137,6 +137,19 @@ shipped   → returned
 
 **Phase 14 — Emergency Cancel (تأییدشده):** `pickedUp` یک مسیر خروج دیگر هم دارد: `pickedUp → emergencyCancelled` (فقط با تأیید ادمین روی درخواست لغو اضطراری پیک — `services/emergencyCancelService.ts`). جزئیات کامل در `CLAUDE.md`.
 
+**Phase 14 — Decision 7 (تصمیم‌گرفته‌شده؛ پیاده‌سازی کامل، تأیید تراکنشی در انتظار): معنای `skipped`**
+
+- **`skipped`** = سفارش عمداً و **پیش از pickup** از Run جاری حذف شده و می‌تواند در یک Run آینده تخصیص یابد.
+- گذار Stop: `pending → skipped`؛ `skipped` پایانی است و **`skipped → pending` وجود ندارد**. Stop قدیمیِ skipped به‌عنوان تاریخچه در Run قدیمی می‌ماند؛ تخصیص مجدد با یک Run **جدید** و یک Stop **جدید** انجام می‌شود.
+- گذار Order: `Order.delivery: assigned → unassigned` (آزادسازی `courierId` و `assignedAt`). **`Order.status` تغییر نمی‌کند** (Decision 3).
+- Stop **حالت `picked_up` ندارد** (فقط `pending|delivered|failed|skipped`)؛ pickup فقط روی `Order.delivery` است. پس حالت‌های معتبر رقابت `skipStop` و `confirmPickup` فقط این دو هستند: *skip برنده:* `stop=skipped` + `delivery=unassigned`؛ *pickup برنده:* `stop=pending` + `delivery=picked_up`. دو ترکیب `skipped+picked_up` و `pending+unassigned` نامعتبرند. `skipStop` پس از pickup رد می‌شود (`ORDER_NOT_ASSIGNED`).
+- **تکمیل Run:** Run وقتی هیچ Stop در وضعیت `pending` ندارد `completed` می‌شود. Run که همه‌ی Stopهایش skipped شده `completed` است (Stop=skipped، Order=unassigned)، **نه `cancelled`**؛ `cancelled` برای لغو صریح (از جمله Emergency Cancel) محفوظ است.
+- **گزارش/KPI آینده** باید `delivered`، `failed` و `skipped` را جدا بشمارد؛ skipped «تحویل موفق» نیست. چیزی از KPI در این Decision ساخته نشد.
+- **مجوز:** `skipStop` همچنان فقط courier است (`requireRole` در `deliveryRunService.skipStop`، بدون route HTTP). گذار عمومی `assigned→unassigned` در `canActorTransitionOrderDelivery` **همچنان فقط admin** است. آزادسازی توسط skip با یک قانون صریح و جدا در دامنه مجاز می‌شود: `canActorReleaseAssignmentViaSkip(role)` (فقط courier) در `packages/shared/src/domain/delivery.ts`؛ و خودِ نوشتن Order به `_id` سفارشِ همان Stop، `delivery.status=assigned` و `delivery.courierId` همان Run مقید است — یعنی هیچ مجوز عمومی «هر assigned→unassigned» برای courier وجود ندارد.
+- **تراکنش و هم‌روندی:** Stopها **embedded** در سند `DeliveryRun` هستند؛ نوشتن Stop همان نوشتن سند مشترک Run است، پس دو `skipStop` هم‌زمان روی دو Stop یک Run طبیعتاً روی همان سند conflict می‌دهند (و `withTransaction` بازنشانی/retry می‌کند). هیچ فیلد یا «نوشتن Run» مصنوعی اضافه نشده و آزمایش «حذف محافظ جدا از Run» برای این معماری بی‌معناست (Run مستقل از Stop وجود ندارد). ترتیب داخل تراکنش: خواندن Run با session → نوشتن Stop (شرطی) → نوشتن Order (شرطی) → AuditLog → بررسی pending با همان session → تکمیل Run در صورت لزوم. `confirmPickup` اکنون یک تراکنش all-or-nothing است؛ همان سند Order نقطه‌ی conflict آن با `skipStop` است.
+- **AuditLog:** `deliveryRun.stop_skipped` (`entityType: DeliveryRun`)، داخل همان تراکنش؛ abort ⇒ rollback.
+- **Decision 7 فریز نیست:** تأیید با تراکنش واقعی MongoDB (replica set) هنوز اجرا نشده است (CLAUDE.md).
+
 ### DeliveryRunEmergencyCancelRequest (Phase 14 — Emergency Cancel)
 
 مکانیزم بازیابی صریح برای یک `DeliveryRun` فعال که حداقل یک سفارش آن `pickedUp` شده — دقیقاً جایی که `cancelRun` عادی عمداً رد می‌کند (`RUN_HAS_PICKED_UP_ORDERS`). سطح run است، نه سطح سفارش/آیتم (این یک فروشگاه میوه است؛ تحویل جزئی مدل نمی‌شود).

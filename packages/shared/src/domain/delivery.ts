@@ -220,6 +220,25 @@ export function canActorTransitionOrderDelivery(from: OrderDeliveryStatus, to: O
 }
 
 /**
+ * Phase 14 Decision 7 — the explicit, SEPARATE rule for `skipStop`'s
+ * ownership release. The generic actor table above is deliberately NOT
+ * changed: `assigned → unassigned` stays admin-only for every caller that
+ * goes through `canActorTransitionOrderDelivery` (e.g. an admin cancelling
+ * a run). A courier skipping a pending stop is allowed to release ITS OWN
+ * assigned order only because releasing the assignment is the defined
+ * meaning of "skipped" (the order was removed from the current run before
+ * pickup). This function authorizes that one operation and nothing else; the
+ * service additionally constrains the release to the exact active
+ * run / courier / order relationship inside the write's own filter, so this
+ * is never a general courier permission to un-assign arbitrary orders.
+ * Admins are intentionally not included: `skipStop` stays courier-only
+ * (authorization policy unchanged by Decision 7).
+ */
+export function canActorReleaseAssignmentViaSkip(role: UserRole): boolean {
+  return role === "courier";
+}
+
+/**
  * A stop outcome is the courier's PROPOSAL on the order, mapped onto the
  * existing proposed outcomes. A failed delivery can only be proposed as
  * "returned" — `delivered | returned` are the only outcomes the approved

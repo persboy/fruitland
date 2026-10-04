@@ -1,6 +1,7 @@
-import { Types, startSession } from "mongoose";
+import { Types, startSession, type ClientSession } from "mongoose";
 import {
   buildInitialStops,
+  canActorReleaseAssignmentViaSkip,
   canActorTransitionOrderDelivery,
   canTransitionDeliveryRun,
   canTransitionDeliveryStop,
@@ -13,6 +14,7 @@ import {
 } from "@fruitland/shared";
 import { AppError } from "../errors/AppError";
 import { requireRole, type AuthContext } from "../auth/guard";
+import { AuditLog } from "../models/AuditLog";
 import { DeliveryRun, type IDeliveryRun } from "../models/DeliveryRun";
 import { Order } from "../models/Order";
 import { User } from "../models/User";
@@ -40,6 +42,7 @@ import { User } from "../models/User";
  * multi-document operation in this file for which partial success is not
  * an accepted domain state, so it is the one place that uses a MongoDB
  * transaction (`mongoose.startSession()` + `session.withTransaction`) —
+ * (since Decision 7 `skipStop` and `confirmPickup` are also transactional)
  * everywhere else, a single-document conditional update is enough because
  * each of those operations only ever needs one Order (or the run's own
  * document) to change atomically. Transactions need a replica set/mongos;
@@ -89,6 +92,22 @@ export function toDeliveryRunDto(run: RunRecord): DeliveryRunDto {
     completedAt: run.completedAt?.toISOString() ?? null,
     cancelledAt: run.cancelledAt?.toISOString() ?? null,
   };
+}
+
+/**
+ * Optional, caller-supplied observation/synchronisation point for the two
+ * transactional courier operations (`confirmPickup`, `skipStop`). Production
+ * callers never pass it, so it has no effect there and carries no business
+ * rule. `afterFirstRead` is invoked once per EXECUTION of the transaction
+ * callback — i.e. again on every `withTransaction` retry, with an
+ * increasing `attempt` (1 for the first execution) — immediately after the
+ * callback's first read of the run through the transaction's own session
+ * and before any write. A test can therefore (a) hold only `attempt === 1`
+ * at a barrier and (b) count callback executions, without any
+ * test-specific branch inside the domain logic.
+ */
+export interface TransactionHooks {
+  afterFirstRead?: (info: { attempt: number }) => Promise<void> | void;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -178,6 +197,26 @@ function requireActiveRun(run: RunRecord): void {
   if (run.status !== "active") {
     throw AppError.conflict("این ماموریت فعال نیست", "DELIVERY_RUN_NOT_ACTIVE");
   }
+}
+
+/**
+ * Pending-stop check for Decision 7. The `session` parameter is REQUIRED (not
+ * optional) so a caller cannot accidentally run this outside the
+ * transaction; the query is `.session(session)`d, so it reads the
+ * transaction's own snapshot including that transaction's earlier writes.
+ */
+async function runHasPendingStop(runId: Types.ObjectId, session: ClientSession): Promise<boolean> {
+  const found = await DeliveryRun.exists({ _id: runId, status: "active", stops: { $elemMatch: { status: "pending" } } }).session(session);
+  return found !== null;
+}
+
+/** Plain Error (not AppError) by design — see activateRun's doc comment. */
+function transactionsUnsupportedError(cause: unknown): Error {
+  return new Error(
+    "این عملیات به یک تراکنش چندسندی MongoDB نیاز دارد که این استقرار (mongod مستقل، نه replica set/mongos) از آن پشتیبانی نمی‌کند. " +
+      "برای این عملیات، MongoDB باید به‌صورت replica set (یا mongos) پیکربندی شود.",
+    { cause },
+  );
 }
 
 /** Returns the released order ids' effect only; safe to call for orders that already moved on (they simply don't match). */
@@ -487,17 +526,67 @@ export async function cancelRun(actor: AuthContext, runId: string): Promise<Deli
  * Applies to all still-pending stops in one call and is idempotent (a stop
  * already past "pending" is simply not touched again).
  */
-export async function confirmPickup(actor: AuthContext, runId: string): Promise<{ pickedUpCount: number }> {
+export async function confirmPickup(
+  actor: AuthContext,
+  runId: string,
+  hooks?: TransactionHooks,
+): Promise<{ pickedUpCount: number }> {
   requireRole(actor, ["courier"]);
-  const run = await loadOwnRun(actor, runId);
-  requireActiveRun(run);
+  const id = toObjectId(runId, RUN_NOT_FOUND);
+  const courierObjectId = toObjectId(actor.userId, RUN_NOT_FOUND);
   assertOrderTransition("assigned", "picked_up", actor);
-  const pendingOrderIds = run.stops.filter((s) => s.status === "pending").map((s) => s.orderId);
-  const result = await Order.updateMany(
-    { _id: { $in: pendingOrderIds }, "delivery.status": "assigned", "delivery.courierId": run.courierId },
-    { $set: { "delivery.status": "picked_up", "delivery.pickedUpAt": new Date() } },
-  );
-  return { pickedUpCount: result.modifiedCount };
+
+  // Decision 7: all-or-nothing across every pending stop (a failing stop
+  // aborts the whole transaction, so no partial pickup survives) and
+  // race-safe against `skipStop` on the same order: both write the same
+  // Order document, so MongoDB serialises them — see skipStop.
+  let attempt = 0;
+  let pickedUpCount = 0;
+  const session = await startSession();
+  try {
+    // NOTE: no try/catch inside this callback — a MongoDB write conflict
+    // (TransientTransactionError) must reach `withTransaction` untouched
+    // so its retry logic can see the original error labels.
+    await session.withTransaction(async () => {
+      attempt += 1;
+      pickedUpCount = 0;
+      const run = await DeliveryRun.findOne({ _id: id, courierId: courierObjectId }).session(session).lean<RunRecord>();
+      await hooks?.afterFirstRead?.({ attempt });
+      if (!run) throw RUN_NOT_FOUND();
+      requireActiveRun(run);
+
+      const pending = run.stops.filter((s) => s.status === "pending").sort((a, b) => a.sequence - b.sequence);
+      for (const stop of pending) {
+        const result = await Order.updateOne(
+          { _id: stop.orderId, "delivery.status": "assigned", "delivery.courierId": run.courierId },
+          { $set: { "delivery.status": "picked_up", "delivery.pickedUpAt": new Date() } },
+          { session },
+        );
+        if (result.modifiedCount === 1) {
+          pickedUpCount += 1;
+          continue;
+        }
+        // Not assigned any more. Already picked up by this same courier is
+        // the idempotent repeat of an earlier call (counted as 0, not an
+        // error); anything else means the pending stop and its order
+        // disagree, so the WHOLE pickup aborts and rolls back.
+        const order = await Order.findOne({ _id: stop.orderId }, { delivery: 1 }).session(session).lean<{ delivery?: { status?: string; courierId?: Types.ObjectId } }>();
+        const alreadyMine = order?.delivery?.status === "picked_up" && order.delivery.courierId?.equals(run.courierId);
+        if (!alreadyMine) {
+          throw AppError.conflict(
+            "وضعیت یکی از سفارش‌ها تغییر کرده است؛ کل عملیات تحویل‌گیری لغو شد",
+            "ORDER_NOT_ASSIGNED",
+          );
+        }
+      }
+    });
+  } catch (error) {
+    if (isTransactionsUnsupportedError(error)) throw transactionsUnsupportedError(error);
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+  return { pickedUpCount };
 }
 
 /**
@@ -593,21 +682,131 @@ export async function proposeStopOutcome(
   return freshDto(run._id);
 }
 
-/** The courier postpones/skips a pending stop. The order stays with the courier (still picked_up); no Order.delivery change. */
-export async function skipStop(actor: AuthContext, runId: string, stopId: string): Promise<DeliveryRunDto> {
+/**
+ * Decision 7 — the meaning of "skipped": the order was intentionally removed
+ * from the CURRENT run before pickup and may be assigned to a future run.
+ *
+ *   Stop  : pending  → skipped      (terminal; never back to pending — a
+ *                                    future assignment is a NEW stop in a
+ *                                    NEW run, the old stop stays as history)
+ *   Order : delivery assigned → unassigned  (courierId/assignedAt released)
+ *   Order.status is NEVER touched (Decision 3).
+ *   Run   : completed when no pending stop remains (an all-skipped run is
+ *           "completed", never "cancelled" — cancellation keeps its own
+ *           meaning). A future KPI/report must count skipped separately
+ *           from delivered/failed; nothing here computes KPIs.
+ *
+ * Authorization is unchanged: courier-only, enforced by `requireRole` below.
+ * Releasing the assignment does NOT go through the generic
+ * `assertOrderTransition("assigned","unassigned")` (that stays admin-only
+ * for every other caller); it is authorised by the explicit domain rule
+ * `canActorReleaseAssignmentViaSkip`, and the Order write's own filter pins
+ * it to this exact run's courier and this stop's order.
+ *
+ * One real MongoDB transaction (same `startSession` + `withTransaction`
+ * pattern as activateRun). Stops are EMBEDDED in the DeliveryRun document,
+ * so writing a stop IS writing the shared run document — two concurrent
+ * skips of different stops of one run write the same document and MongoDB
+ * raises a write conflict for the loser, which `withTransaction` retries on
+ * a fresh snapshot. No artificial extra "run write" exists or is needed.
+ * Inside the transaction, in this order:
+ *   1. read run through the session            (snapshot; hook point)
+ *   2. embedded stop write  (conditional: still pending, run active)
+ *   3. Order write          (conditional: still assigned to this courier)
+ *   4. AuditLog write       (same session — aborts roll it back)
+ *   5. pending-stop check   (same session, after the writes above)
+ *   6. run completion write (only if no pending stop remains)
+ * A losing race against `confirmPickup` fails step 3 (order no longer
+ * assigned) and the whole transaction, including step 2, aborts.
+ *
+ * Errors thrown here are never caught inside the callback, so a MongoDB
+ * TransientTransactionError reaches `withTransaction` with its labels
+ * intact; the manual retry loop the driver provides is the only retry.
+ */
+export async function skipStop(actor: AuthContext, runId: string, stopId: string, hooks?: TransactionHooks): Promise<DeliveryRunDto> {
   requireRole(actor, ["courier"]);
-  const run = await loadOwnRun(actor, runId);
-  requireActiveRun(run);
-  const stop = run.stops.find((s) => s._id.toString() === stopId);
-  if (!stop) throw AppError.notFound("توقف یافت نشد", "DELIVERY_STOP_NOT_FOUND");
-  if (!canTransitionDeliveryStop(stop.status, "skipped")) {
-    throw AppError.conflict("وضعیت این توقف قبلاً مشخص شده است", "DELIVERY_STOP_ALREADY_RESOLVED");
+  if (!canActorReleaseAssignmentViaSkip(actor.role)) {
+    throw AppError.forbidden("این عملیات برای نقش شما مجاز نیست", "FORBIDDEN_DELIVERY_TRANSITION");
   }
-  if (!(await claimStop(run, stop._id, "skipped"))) {
-    throw AppError.conflict("وضعیت ماموریت تغییر کرد؛ دوباره تلاش کنید", "DELIVERY_RUN_CHANGED");
+  const id = toObjectId(runId, RUN_NOT_FOUND);
+  const courierObjectId = toObjectId(actor.userId, RUN_NOT_FOUND);
+  const stopObjectId = toObjectId(stopId, () => AppError.notFound("توقف یافت نشد", "DELIVERY_STOP_NOT_FOUND"));
+
+  let attempt = 0;
+  const session = await startSession();
+  try {
+    await session.withTransaction(async () => {
+      attempt += 1;
+      // 1. First read of the run goes through the transaction's session.
+      const run = await DeliveryRun.findOne({ _id: id, courierId: courierObjectId }).session(session).lean<RunRecord>();
+      await hooks?.afterFirstRead?.({ attempt });
+      if (!run) throw RUN_NOT_FOUND();
+      requireActiveRun(run);
+      const stop = run.stops.find((s) => s._id.equals(stopObjectId));
+      if (!stop) throw AppError.notFound("توقف یافت نشد", "DELIVERY_STOP_NOT_FOUND");
+      if (!canTransitionDeliveryStop(stop.status, "skipped")) {
+        throw AppError.conflict("وضعیت این توقف قبلاً مشخص شده است", "DELIVERY_STOP_ALREADY_RESOLVED");
+      }
+      const now = new Date();
+
+      // 2. Embedded stop write (= write to the shared run document).
+      const claim = await DeliveryRun.updateOne(
+        { _id: run._id, courierId: run.courierId, status: "active", stops: { $elemMatch: { _id: stop._id, status: "pending" } } },
+        { $set: { "stops.$.status": "skipped", "stops.$.completedAt": now } },
+        { session },
+      );
+      if (claim.modifiedCount !== 1) {
+        throw AppError.conflict("وضعیت ماموریت تغییر کرد؛ دوباره تلاش کنید", "DELIVERY_RUN_CHANGED");
+      }
+
+      // 3. Release this order's assignment — pinned to this run's courier.
+      const release = await Order.updateOne(
+        { _id: stop.orderId, "delivery.status": "assigned", "delivery.courierId": run.courierId },
+        { $set: { "delivery.status": "unassigned" }, $unset: { "delivery.courierId": 1, "delivery.assignedAt": 1 } },
+        { session },
+      );
+      if (release.modifiedCount !== 1) {
+        throw AppError.conflict(
+          "این سفارش دیگر در وضعیت «تخصیص‌یافته» نیست (احتمالاً تحویل پیک شده است)؛ رد کردن توقف ممکن نیست",
+          "ORDER_NOT_ASSIGNED",
+        );
+      }
+
+      // 4. Audit entry in the same transaction.
+      await AuditLog.create(
+        [
+          {
+            actorUserId: courierObjectId,
+            action: "deliveryRun.stop_skipped",
+            entityType: "DeliveryRun",
+            entityId: run._id,
+            before: { stopStatus: "pending", orderDelivery: "assigned" },
+            after: { stopId: stop._id, orderId: stop.orderId, stopStatus: "skipped", orderDelivery: "unassigned" },
+          },
+        ],
+        { session },
+      );
+
+      // 5. Pending check: same session, after the shared-document write.
+      if (!(await runHasPendingStop(run._id, session))) {
+        // 6. Completion, same transaction.
+        const done = await DeliveryRun.updateOne(
+          { _id: run._id, status: "active" },
+          { $set: { status: "completed", completedAt: now } },
+          { session },
+        );
+        if (done.modifiedCount !== 1) {
+          throw AppError.conflict("وضعیت ماموریت تغییر کرد؛ دوباره تلاش کنید", "DELIVERY_RUN_CHANGED");
+        }
+      }
+    });
+  } catch (error) {
+    if (isTransactionsUnsupportedError(error)) throw transactionsUnsupportedError(error);
+    throw error;
+  } finally {
+    await session.endSession();
   }
-  await completeRunIfFinished(run._id);
-  return freshDto(run._id);
+  return freshDto(id);
 }
 
 // ---------------------------------------------------------------- read

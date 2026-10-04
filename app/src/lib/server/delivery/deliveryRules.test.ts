@@ -3,6 +3,9 @@ import {
   ORDER_DELIVERY_STATUSES,
   USER_ROLES,
   buildInitialStops,
+  ORDER_DELIVERY_TRANSITIONS,
+  DELIVERY_STOP_TRANSITIONS,
+  canActorReleaseAssignmentViaSkip,
   canActorTransitionOrderDelivery,
   canTransitionDeliveryRun,
   canTransitionDeliveryStop,
@@ -209,5 +212,50 @@ describe("EmergencyCancelRequest status machine", () => {
     expect(canTransitionEmergencyCancelRequest("approved", "rejected")).toBe(false);
     expect(canTransitionEmergencyCancelRequest("rejected", "pending")).toBe(false);
     expect(canTransitionEmergencyCancelRequest("rejected", "approved")).toBe(false);
+  });
+});
+
+describe("Decision 7 — skipped is terminal; skipStop's ownership release is its own explicit rule", () => {
+  it("pending → skipped is allowed", () => {
+    expect(canTransitionDeliveryStop("pending", "skipped")).toBe(true);
+  });
+
+  it("skipped → anything is rejected, in particular skipped → pending does not exist", () => {
+    expect(DELIVERY_STOP_TRANSITIONS.skipped).toEqual([]);
+    for (const to of ["pending", "delivered", "failed", "skipped"] as const) {
+      expect(canTransitionDeliveryStop("skipped", to)).toBe(false);
+    }
+  });
+
+  it("there is no picked_up Stop state (pickup is an Order.delivery state only)", () => {
+    expect(Object.keys(DELIVERY_STOP_TRANSITIONS).sort()).toEqual(["delivered", "failed", "pending", "skipped"]);
+  });
+
+  it("Order.delivery assigned → unassigned remains a valid transition", () => {
+    expect(ORDER_DELIVERY_TRANSITIONS.assigned).toContain("unassigned");
+  });
+
+  it("the GENERIC assigned → unassigned stays admin-only (a courier may not do it through the generic rule)", () => {
+    expect(canActorTransitionOrderDelivery("assigned", "unassigned", "admin")).toBe(true);
+    expect(canActorTransitionOrderDelivery("assigned", "unassigned", "master_admin")).toBe(true);
+    expect(canActorTransitionOrderDelivery("assigned", "unassigned", "courier")).toBe(false);
+    expect(canActorTransitionOrderDelivery("assigned", "unassigned", "customer")).toBe(false);
+  });
+
+  it("the explicit skip-release rule is courier-only and grants nothing to anyone else", () => {
+    for (const role of USER_ROLES) {
+      expect(canActorReleaseAssignmentViaSkip(role)).toBe(role === "courier");
+    }
+  });
+
+  it("the skip-release rule does not widen any generic transition for couriers", () => {
+    for (const from of ORDER_DELIVERY_STATUSES) {
+      for (const to of ORDER_DELIVERY_STATUSES) {
+        const key = `${from}>${to}`;
+        const courierAllowed = canActorTransitionOrderDelivery(from, to, "courier");
+        // Only the two pre-existing courier transitions remain.
+        expect(courierAllowed).toBe(key === "assigned>picked_up" || key === "picked_up>proposed");
+      }
+    }
   });
 });
