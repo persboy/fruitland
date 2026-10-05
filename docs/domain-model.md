@@ -63,9 +63,9 @@ Legacy یک سیستم آنلاین‌پرداخت کامل (ZarinPal) و کیف
 | **ReviewAttribute** | تعریف ویژگی قابل‌امتیازدهی (تازگی، شیرینی...) | Admin | فعال↔غیرفعال | بله |
 | **Notification** | اعلان پنل ادمین | سیستم | خوانده‌نشده↔خوانده‌شده | بله |
 | **AuditLog** | لاگ عملیات حساس ادمین | سیستم | Append-only | بله |
-| **StoreSettings** | اطلاعات فروشگاه | Admin | Singleton | بله |
+| **StoreSettings** | اطلاعات فروشگاه + `socialLinks` (instagram/telegram/whatsapp؛ ذخیره‌ی فیزیکی اینجا، مدیریت از صفحه‌ی Site Content؛ `isConfigured` فقط با `storeName` و `supportPhone` برقرار می‌شود) | Admin | Singleton | بله |
 | **ShippingSettings** | هزینه‌ی ارسال / آستانه‌ی رایگان | Admin | Singleton | بله |
-| **SiteContent** | محتوای ثابت سایت (درباره‌ما، شرایط...) | Admin | Singleton | بله |
+| **SiteContent** | محتوای ثابت سایت (متن plain-text صفحات ثابت `about` و `terms`) | Admin | کلکسیون با کلید `slug` یکتا (مجموعه‌ی ثابت؛ **نه** Singleton) | بله |
 | **FaqItem** | سؤال متداول | Admin | ترتیب‌پذیر | بله |
 | **HomepageSlide** | اسلاید صفحه‌ی اصلی | Admin | ترتیب‌پذیر | بله |
 
