@@ -4,7 +4,7 @@
 
 ## وضعیت فعلی
 
-- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۱ تأیید شد. مرحله‌ی ۱۲ (MapView/LocationPicker frontend) کامل. مرحله‌ی ۱۳ (Map Rendering Provider: Neshan/Google/Leaflet) پیاده شد، منتظر تأیید. مرحله‌ی ۱۴ (Courier & Delivery Domain: DeliveryRun) پیاده شد، منتظر تأیید. بعدی پس از تأیید: API مربوط به DeliveryRun / اتصال به یک صفحه‌ی واقعی
+- **فاز:** Phase 4 — Admin — صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) پیاده‌سازی شد، منتظر تأیید کاربر. فاز ۴.۵ (نقشه) در جریان: مرحله‌ی ۹ تأیید شد (endpointها `requireAuth`، بدون محدودیت نقش). مرحله‌ی ۱۱ تأیید شد. مرحله‌ی ۱۲ (MapView/LocationPicker frontend) کامل. مرحله‌ی ۱۳ (Map Rendering Provider: Neshan/Google/Leaflet) پیاده شد، منتظر تأیید. مرحله‌ی ۱۴ (Courier & Delivery Domain: DeliveryRun) پیاده شد، منتظر تأیید. **Phase 4 — صفحه‌ی ۳ (Categories) پیاده‌سازی شد، منتظر تأیید کاربر** (جزئیات در «صفحه‌ی ۳: Categories»). تصمیم‌های ۷ و ۸ DeliveryRun فریز نشده‌اند (تأیید replica-set به تعویق افتاده) و این فاز آن‌ها را تغییر نداد. بعدی پس از تأیید: صفحه‌ی ۴ (Site Content) طبق ترتیب MP §39
 - **معماری تأییدشده:** یک اپ Next.js واحد (storefront + admin + courier + API Routes)، **نه** بک‌اند Express جدا. تصمیم کاربر، ثبت‌شده.
 - **مسیرها:** storefront در `app/src/app/(storefront)/` (بدون پیشوند URL، فقط برای سازمان‌دهی کد)، ادمین زیر `/admin`، پیک زیر `/courier` — هرکدام layout جدای خودشان.
 - **معماری احراز هویت تأییدشده:** جزئیات کامل در `docs/auth.md`. خلاصه: OTP برای customer/courier، رمز عبور برای admin/master_admin، JWT access(۱۵m)+refresh(۳۰day, rotating)، اولین کاربر کل سیستم اتمیک MASTER_ADMIN می‌شود.
@@ -163,7 +163,7 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **تست:** `npm run verify` پاس؛ ۹۰ تست واحد در app (شامل ۱۰ تست جریان ورود، ۳ SmsIrProvider، ۲ env، ۲ گروه helper).
 - **اجرا نشده (محدودیت sandbox):** بررسی بصری/اسکرین‌شات ۳۷۵/۷۶۸/۱۲۸۰px (مرورگر در دسترس نیست — ظاهر با Legacy مقایسه‌ی کدی شده، نه بصری)، axe (کنتراست `text-gray-400` روی سفید Legacy احتمالاً زیر ۴.۵:۱ است؛ رنگ عیناً حفظ شد)، E2E، تست‌های یکپارچه‌ی DB، ارسال واقعی sms.ir.
 
-### صفحه‌ی ۲: Settings (پیاده‌سازی شد؛ منتظر تأیید کاربر)
+### صفحه‌ی ۲: Settings (پیاده‌سازی شد؛ کاربر با دستور پیاده‌سازی صفحه‌ی ۳ عملاً آن را پیش‌نیاز تأییدشده دانست — تأیید صریح جدا ثبت نشده)
 
 - **مسیر:** `/admin/settings` (منوی کناری «تنظیمات»؛ زیر `(panel)` پس گارد ورود دارد). چهار کارت با ظاهر Legacy (حالت نمایش/ویرایش): **پروفایل من**، **اطلاعات فروشگاه**، **تنظیمات ارسال**، **روش‌های پرداخت** (فقط COD، فقط‌نمایشی).
 - **تصمیم‌های کاربر:** (۱) تغییر شماره‌ی موبایل ادمین **با OTP روی شماره‌ی جدید** (برخلاف Legacy که بدون OTP بود). (۲) کارت «اعضای تیم و دسترسی‌ها» در Settings **نیست** — بعداً صفحه‌ی جدا.
@@ -178,6 +178,19 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - **تست:** `npm run verify` پاس؛ ۱۱۲ تست (۹ تست Zod، ۱۰ تست کامپوننت کارت‌ها، helper پول/رقم فارسی). smoke روی سرور production با توکن امضاشده: نقش customer → ۴۰۳، مبلغ اعشاری/منفی/رشته‌ای/نام خالی/رمز کوتاه → ۴۰۰ قبل از هر اتصال DB.
 - **اجرا نشده (محدودیت sandbox):** تست یکپارچه‌ی `profileSettings.integration.test.ts` (نوشته شده، نیاز به MongoDB)، مسیر موفق واقعی API با DB، بررسی بصری ۳۷۵/۷۶۸/۱۲۸۰، axe، E2E، ارسال واقعی sms.ir.
 - **نکته‌ی عملیاتی:** `getEnv()` در production با `SMS_PROVIDER=console` می‌ترکد و چون `requireAuth` همه‌ی خطاها را «نشست نامعتبر» گزارش می‌کند، اشتباه در env ورسل به‌شکل ۴۰۱ همه‌جا دیده می‌شود.
+
+### صفحه‌ی ۳: Categories (پیاده‌سازی شد؛ منتظر تأیید کاربر)
+
+**مسیر:** `/admin/categories` (آیتم «دسته‌بندی‌ها» در سایدبار؛ `aria-current` با همان منطق `startsWith`). فقط `admin|master_admin` (`requireAdmin`، سمت سرور).
+
+- **API** (`app/src/app/api/v1/admin/categories/`، envelope استاندارد): `GET /` (فهرست همه‌ی دسته‌ها، فعال و غیرفعال، مرتب‌شده `sortOrder، name، _id`؛ بدون pagination — طبق Settings/Addresses که فهرست کوچک را بدون pagination برمی‌گردانند)، `POST /` (۲۰۱؛ همیشه فعال ساخته می‌شود)، `PATCH /[id]` (ویرایش `name/slug/icon/sortOrder`؛ `icon:""` آیکون را پاک می‌کند)، `PATCH /[id]/status` با بدنه‌ی `{isActive:boolean}` (set صریح، نه toggle). **`DELETE` وجود ندارد** (تصمیم Owner: حذف سخت نیست؛ غیرفعال‌سازی. محصولات می‌توانند به دسته‌ی غیرفعال ارجاع بدهند؛ قانون وابستگی Product در فاز Products).
+- **اعتبارسنجی:** یک منبع مشترک `packages/shared/src/domain/category.ts` (`createCategorySchema`, `updateCategorySchema`, `categoryStatusSchema`, `CategoryDto`) — هم API (مرجع) و هم فرم (فقط UX). قواعد (بدون اختراع قانون کسب‌وکار): name ۱–۵۰؛ slug حروف کوچک ASCII با خط تیره (`^[a-z0-9]+(?:-[a-z0-9]+)*$`، ≤۶۰، trim+lowercase)؛ icon رشته‌ی اختیاری ≤۱۶ (Legacy ایموجی بود؛ بدون کاتالوگ/آپلود)؛ sortOrder عدد صحیح ≥۰. کلیدهای ناشناخته/محافظت‌شده (`isActive`, `_id`, timestamps…) طبق کانونشن پروژه (`z.object`) **حذف** می‌شوند و هرگز به سند نمی‌رسند. شناسه‌ی نامعتبر ⇒ ۴۰۴ `CATEGORY_NOT_FOUND` (همان کانونشن Addresses).
+- **یکتایی slug:** فقط ایندکس یکتای MongoDB مرجع است (بدون check-then-insert)؛ `E11000` در create و update (و در رقابت هم‌زمان) به ۴۰۹ `CATEGORY_SLUG_TAKEN` تبدیل می‌شود (خطای خام Mongo نشت نمی‌کند).
+- **AuditLog** (الگوی Settings، entityType `Category`): `category.created`، `category.updated` (before/after)، `category.activated`، `category.deactivated`. فهرست‌گیری audit نمی‌شود. درخواست فعال/غیرفعال برای حالت فعلی همان‌حالت یک no-op موفق است (بدون نوشتن و بدون audit)؛ فعال/غیرفعال‌سازی شرطی روی حالت قبلی است تا دو درخواست هم‌زمان فقط یک audit بسازند. بدون تراکنش (هر عملیات تک‌سندی؛ audit بعد از نوشتن، مثل settingsService — اگر نوشتن audit شکست بخورد تغییر دسته ثبت‌شده و audit از دست رفته؛ همان ریسک Settings).
+- **UI** (`components/admin/categories/`): فهرست جدولی (آیکون، نام، slug، ترتیب، وضعیت، عملیات) با حالت‌های loading (skeleton)، empty (با دکمه‌ی ایجاد)، error (پیام + «تلاش دوباره»)، forbidden (۴۰۳)، unauthenticated (۴۰۱ + لینک ورود با `returnTo`). ایجاد/ویرایش با **همان فرم اینلاین** (الگوی Settings؛ پروژه کامپوننت modal ندارد و ساخته نشد). `sortOrder` فقط ارقام (ارقام فارسی پذیرفته؛ جداکننده‌ی مبلغ اعمال نمی‌شود). ویرایش فقط فیلدهای تغییرکرده را می‌فرستد؛ بدون تغییر ⇒ بدون درخواست. خطای slug تکراری inline نمایش داده می‌شود و مقادیر حفظ می‌شوند. `AdminShell` برای این مسیر عنوان/زیرعنوان دارد.
+- **فایل‌ها:** `packages/shared/src/domain/category.ts(+test)`، `services/categoryService.ts`، سه `route.ts`، `lib/client/adminCategories.ts`، `components/admin/categories/{CategoriesManager,CategoryForm}.tsx`، `app/admin/(panel)/categories/page.tsx`، تغییر `AdminSidebar`/`AdminShell`.
+- **تأییدشده (اجراشده):** تست‌های جدید: schema مشترک ۲۴، سرویس (unit با mock) ۱۷، API ۳۲ (۱۶+۹+۷)، UI ۱۳ ⇒ کل `npm test` اپ ۶۶۱ (قبلاً ۵۹۹)، `@fruitland/shared` ۱۰۸؛ lint، typecheck و build موفق (سه مسیر API و `/admin/categories` در خروجی build).
+- **اجرا نشد (محدودیت sandbox):** `categoryService.integration.test.ts` (نوشته شد؛ ایندکس یکتای واقعی، رقابت هم‌زمان دو create با یک slug، دو غیرفعال‌سازی هم‌زمان، ترتیب واقعی) — دانلود MongoDB با HTTP 403 رد شد؛ بررسی بصری ۳۷۵/۷۶۸/۱۲۸۰، axe، E2E و مسیر موفق واقعی API با DB و مرورگر. در dev/CI: `npm run test:integration --workspace=app -- src/lib/server/services/categoryService.integration.test.ts`.
 
 ## قانون شماره‌گذاری فازهای میانی (دستور کاربر)
 
@@ -456,11 +469,8 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 
 ## مرحله‌ی بعد
 
-Phase 3 (پایه‌ی احراز هویت + routing/UI system/API client) کامل شد. مرحله‌ی بعد طبق نقشه‌ی
-راه: **Phase 4 — Admin، شروع با «Authentication»** یعنی صفحه‌ی ورود واقعی (`/admin` +
-`page.tsx` ورود با رمز عبور، فرم با `react-hook-form`+Zod، استفاده از `apiClient` برای
-`POST /api/v1/auth/login/password`)، طبق پروتکل کامل پیاده‌سازی صفحه (§۲۴ Master Prompt:
-Spec → Backend (آماده) → Frontend → Verification → Docs → Git → Stop).
+Phase 4 — Admin: صفحه‌ی ۱ (Authentication) تأیید شد؛ صفحه‌ی ۲ (Settings) و ۳ (Categories) پیاده‌سازی شده‌اند. بعد از تأیید صفحه‌ی ۳، آیتم بعدی طبق ترتیب پیش‌فرض MP §39: **۴. Site Content** (Spec جدا لازم است؛ `socialLinks` متعلق به آن است). مسیر DeliveryRun/Orders طبق MP بعد از Products (۷) و Couriers (۸) و Orders (۹) می‌آید.
+تأیید replica-set برای تصمیم‌های ۷ و ۸ DeliveryRun همچنان معلق است و فریز نشده‌اند.
 
 - در محیط dev/CI با دسترسی شبکه‌ی کامل: `npm run test:integration` و `npm run test:e2e` را اجرا و نتیجه را در این فایل ثبت کنید.
 - بررسی بصری واقعی (۳۷۵/۷۶۸/۱۲۸۰px) صفحات ساخته‌شده در این فاز، در محیط dev واقعی.

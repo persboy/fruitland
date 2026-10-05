@@ -14,6 +14,7 @@ type GateState = { status: "loading" } | { status: "network-error" } | { status:
 
 const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/admin": { title: "میز کار ادمین", subtitle: "خلاصه عملکرد امروز غرفه" },
+  "/admin/categories": { title: "دسته‌بندی‌ها", subtitle: "مدیریت دسته‌بندی محصولات" },
   "/admin/settings": { title: "تنظیمات", subtitle: "مدیریت حساب، فروشگاه و ارسال" },
 };
 

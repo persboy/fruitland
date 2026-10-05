@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Leaf, Settings, X, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Layers, Leaf, Settings, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ROLE_LABELS, displayNameOf, type SessionUser } from "@/lib/client/adminAuth";
 
@@ -16,6 +16,7 @@ interface NavItem {
 // Each Phase 4 page adds its own entry here when it is built.
 const navItems: NavItem[] = [
   { href: "/admin", label: "میز کار", icon: LayoutDashboard },
+  { href: "/admin/categories", label: "دسته‌بندی‌ها", icon: Layers },
   { href: "/admin/settings", label: "تنظیمات", icon: Settings },
 ];
 

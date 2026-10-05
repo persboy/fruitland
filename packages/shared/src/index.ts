@@ -4,3 +4,4 @@ export * from "./phone";
 export * from "./domain/enums";
 export * from "./maps/types";
 export * from "./domain/delivery";
+export * from "./domain/category";
