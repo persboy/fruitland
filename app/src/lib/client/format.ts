@@ -33,3 +33,18 @@ export function formatNumberInput(value: string): string {
   const n = Number(digits);
   return Number.isSafeInteger(n) ? n.toLocaleString("fa-IR") : "";
 }
+
+/** Persian (Jalali) date+time in the business timezone, from an ISO timestamp. */
+export function formatJalaliDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", dateStyle: "medium", timeStyle: "short" });
+}
+
+/** Persian (Jalali) date from an ISO timestamp (registration date etc.), in the business timezone. */
+export function formatJalaliDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", dateStyle: "medium" });
+}
+
+/** Persian (Jalali) form of a calendar date `YYYY-MM-DD` (birth date). UTC on purpose: it has no time/zone, so it must not shift. */
+export function formatJalaliCalendarDate(ymd: string): string {
+  return new Date(`${ymd}T00:00:00.000Z`).toLocaleDateString("fa-IR-u-ca-persian", { timeZone: "UTC", dateStyle: "long" });
+}

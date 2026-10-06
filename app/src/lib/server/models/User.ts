@@ -197,4 +197,11 @@ const userSchema = new Schema<IUser>(
   userSchemaOptions,
 );
 
+/**
+ * Admin Customers list (role = "customer", newest first, optionally filtered by
+ * isActive): the equality field `role` followed by the sort field `createdAt`.
+ * Supersedes the single-field `role` index for that query.
+ */
+userSchema.index({ role: 1, createdAt: -1 });
+
 export const User = (models.User as Model<IUser> | undefined) || model<IUser>("User", userSchema);

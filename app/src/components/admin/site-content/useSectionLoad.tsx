@@ -50,7 +50,18 @@ export function useSectionLoad<T>(fetcher: () => Promise<T>) {
 }
 
 /** Renders every non-ready state (loading / error / forbidden / session expired); renders nothing when ready. */
-export function SectionState<T>({ state, noun, onRetry }: { state: LoadState<T>; noun: string; onRetry: () => void }): ReactNode {
+export function SectionState<T>({
+  state,
+  noun,
+  onRetry,
+  returnTo = "/admin/site-content",
+}: {
+  state: LoadState<T>;
+  noun: string;
+  onRetry: () => void;
+  /** Where the login page should send the admin back to after a 401. */
+  returnTo?: string;
+}): ReactNode {
   if (state.status === "loading") {
     return (
       <Card>
@@ -100,7 +111,7 @@ export function SectionState<T>({ state, noun, onRetry }: { state: LoadState<T>;
           description="برای ادامه دوباره وارد شوید."
           action={
             <Link
-              href={`/admin/login?returnTo=${encodeURIComponent("/admin/site-content")}`}
+              href={`/admin/login?returnTo=${encodeURIComponent(returnTo)}`}
               className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-600"
             >
               ورود

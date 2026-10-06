@@ -16,6 +16,7 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/admin": { title: "میز کار ادمین", subtitle: "خلاصه عملکرد امروز غرفه" },
   "/admin/categories": { title: "دسته‌بندی‌ها", subtitle: "مدیریت دسته‌بندی محصولات" },
   "/admin/site-content": { title: "محتوای سایت", subtitle: "صفحات ثابت، سؤالات متداول، اسلایدها و شبکه‌های اجتماعی" },
+  "/admin/customers": { title: "مشتریان", subtitle: "فهرست مشتریان، ویرایش پروفایل و وضعیت حساب" },
   "/admin/settings": { title: "تنظیمات", subtitle: "مدیریت حساب، فروشگاه و ارسال" },
 };
 
@@ -98,7 +99,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const meta = pageMeta[pathname] ?? { title: "پنل مدیریت", subtitle: "" };
+  const meta =
+    pageMeta[pathname] ??
+    (pathname.startsWith("/admin/customers/") ? { title: "جزئیات مشتری", subtitle: "پروفایل و وضعیت حساب" } : { title: "پنل مدیریت", subtitle: "" });
   const updateUser = (patch: Partial<SessionUser>) =>
     setState((prev) => (prev.status === "ok" ? { status: "ok", user: { ...prev.user, ...patch } } : prev));
   return (

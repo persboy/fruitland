@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, ApiClientError } from "./apiClient";
+import { apiFetch, apiFetchPage, ApiClientError } from "./apiClient";
 
 function jsonResponse(body: unknown, status = 200) {
   return {
@@ -87,5 +87,24 @@ describe("apiFetch", () => {
     expect(b).toEqual({ b: true });
     const refreshCalls = fetchMock.mock.calls.filter((c) => c[0] === "/api/v1/auth/refresh");
     expect(refreshCalls).toHaveLength(1);
+  });
+});
+
+describe("apiFetchPage", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns data together with the envelope pagination", async () => {
+    const env = { ...success([1, 2]), pagination: { page: 2, pageSize: 20, total: 45 } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(env)));
+    expect(await apiFetchPage<number[]>("/list?page=2")).toEqual({ data: [1, 2], pagination: { page: 2, pageSize: 20, total: 45 } });
+  });
+
+  it("throws ApiClientError on failure and when the server sends no pagination", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(failure("FORBIDDEN_ROLE"), 403)));
+    await expect(apiFetchPage("/list")).rejects.toMatchObject({ status: 403, code: "FORBIDDEN_ROLE" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(success([]))));
+    await expect(apiFetchPage("/list")).rejects.toBeInstanceOf(ApiClientError);
   });
 });

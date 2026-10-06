@@ -64,7 +64,7 @@ async function doFetch<T>(path: string, options: ApiFetchOptions): Promise<{ sta
  * before surfacing the error — so an expired 15-minute access token doesn't
  * interrupt the user mid-session. Never retries more than once.
  */
-export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+async function apiRequest<T>(path: string, options: ApiFetchOptions): Promise<ApiEnvelope<T>> {
   let { status, envelope } = await doFetch<T>(path, options);
 
   if (!envelope.success && envelope.error) {
@@ -84,5 +84,23 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
     throw new ApiClientError(status, envelope.error?.code ?? "UNKNOWN_ERROR", envelope.error?.message ?? "خطای ناشناخته رخ داد");
   }
 
-  return envelope.data as T;
+  return envelope;
+}
+
+export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+  return (await apiRequest<T>(path, options)).data as T;
+}
+
+export interface PageInfo {
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** Same as apiFetch (same refresh/error handling) but also returns the envelope's `pagination` for paged lists. */
+export async function apiFetchPage<T>(path: string, options: ApiFetchOptions = {}): Promise<{ data: T; pagination: PageInfo }> {
+  const envelope = await apiRequest<T>(path, options);
+  const p = envelope.pagination as PageInfo | null;
+  if (!p) throw new ApiClientError(500, "MISSING_PAGINATION", "پاسخ سرور ناقص است");
+  return { data: envelope.data as T, pagination: p };
 }

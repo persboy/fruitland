@@ -232,6 +232,7 @@ API قابل‌تغییر/تفویض نیست (طبق بخش ۱۷ Master Prompt)
 | User | `phone` | ورود/جست‌وجوی کاربر | بله |
 | User | `customerCode` | شناسایی سفارش تلفنی | بله (sparse) |
 | User | `referralCode` | اعتبارسنجی کد دعوت | بله (sparse) |
+| User | `{role, createdAt:-1}` | فهرست مشتریان ادمین (`role=customer`، جدیدترین اول) | خیر |
 | Category | `slug` | صفحه‌ی دسته‌بندی storefront | بله |
 | Product | `{category, isActive}` | لیست محصولات یک دسته | خیر |
 | Product | `name` (text) | جست‌وجوی محصول | خیر |

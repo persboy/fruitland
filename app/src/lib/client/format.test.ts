@@ -33,3 +33,17 @@ describe("formatNumberInput", () => {
     expect(parseTomanInput(formatNumberInput("1234567"))).toBe(1234567);
   });
 });
+
+describe("Jalali date helpers", () => {
+  it("formatJalaliDate renders Persian digits in the Persian calendar (Tehran)", async () => {
+    const { formatJalaliDate, formatJalaliDateTime, formatJalaliCalendarDate } = await import("./format");
+    expect(formatJalaliDate("2026-03-21T12:00:00.000Z")).toMatch(/۱۴۰۵/);
+    expect(formatJalaliDateTime("2026-03-21T12:00:00.000Z")).toMatch(/[۰-۹]/);
+    expect(formatJalaliCalendarDate("1990-05-17")).toMatch(/۱۳۶۹/);
+  });
+  it("a calendar date does not shift with the timezone (UTC date-only)", async () => {
+    const { formatJalaliCalendarDate } = await import("./format");
+    expect(formatJalaliCalendarDate("2026-03-21")).toBe(formatJalaliCalendarDate("2026-03-21"));
+    expect(formatJalaliCalendarDate("2026-03-20")).not.toBe(formatJalaliCalendarDate("2026-03-21"));
+  });
+});
