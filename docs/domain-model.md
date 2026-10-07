@@ -179,11 +179,17 @@ pending → approved | rejected   (هر دو پایانی)
 - Audit کامل از طریق `AuditLog` موجود (بدون مکانیزم audit دوم).
 
 ### DiscountCode
+وضعیت **ذخیره نمی‌شود؛ از فیلدهای خود کد محاسبه می‌شود** (اولویت دقیق: `exhausted` > `disabled` > `expired` > `active`):
 ```
-active ⇄ inactive   (دستی توسط ادمین)
-active → expired     (خودکار، بر اساس expiresAt)
-active → exhausted    (خودکار، usedCount == maxUsage)
+exhausted  usageLimit وجود دارد و usedCount >= usageLimit
+disabled   isActive === false            (تنها بخش دستی: ادمین فعال/غیرفعال می‌کند)
+expired    کد فعال است و expiresAt از «اکنون» گذشته
+active     هیچ‌کدام از بالا
 ```
+- `usageLimit` اختیاری است (نبودن = نامحدود؛ نام قدیمی `maxUsage` منسوخ است). `usedCount` شمارنده‌ی فعلی استفاده است و برای ادمین فقط‌خواندنی؛ `usageLimit` هرگز کمتر از `usedCount` نمی‌شود.
+- `expiresAt` یک لحظه‌ی واقعی (UTC) است که **سرور** از روز تقویمی انتخاب‌شده می‌سازد: پایان همان روز (۲۳:۵۹:۵۹.۹۹۹) به وقت `Asia/Tehran`.
+- هیچ حذف سخت وجود ندارد؛ کد فقط غیرفعال می‌شود. `code`، `type` و `ownerUserId` بعد از ساخت تغییر نمی‌کنند.
+- افزایش/کاهش/بازنشانی `usedCount` (مصرف و آزادسازی) به فاز Checkout/Orders تعلق دارد، نه پنل ادمین.
 
 ### User.role
 تغییر نقش فقط توسط MASTER_ADMIN و فقط برای ارتقا/تنزل ADMIN↔CUSTOMER؛ MASTER_ADMIN هرگز از طریق

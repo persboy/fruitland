@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
-import type { ZodSchema } from "zod";
+import type { ZodType, ZodTypeDef } from "zod";
 import { AppError } from "../errors/AppError";
 
-export async function parseJsonBody<T>(request: NextRequest, schema: ZodSchema<T>): Promise<T> {
+/** The schema's INPUT type is deliberately `unknown` (as in parseQuery): schemas whose transforms change the input shape (e.g. `null` → omitted) are supported. */
+export async function parseJsonBody<T>(request: NextRequest, schema: ZodType<T, ZodTypeDef, unknown>): Promise<T> {
   let raw: unknown;
   try {
     raw = await request.json();

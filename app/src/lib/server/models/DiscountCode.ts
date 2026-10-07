@@ -17,12 +17,14 @@ export interface IDiscountCode {
   percentage: number;
   maxDiscountAmount?: number;
   minOrderAmount: number;
-  /** null/undefined = unlimited uses. */
+  /** Missing = unlimited uses. `usedCount` is the current usage count and is read-only for admins. */
   usageLimit?: number;
   usedCount: number;
   isActive: boolean;
   expiresAt?: Date;
 }
+
+const integerValidator = (label: string) => ({ validator: Number.isInteger, message: `${label} must be an integer` });
 
 const discountCodeSchema = new Schema<IDiscountCode>(
   {
@@ -38,10 +40,12 @@ const discountCodeSchema = new Schema<IDiscountCode>(
         "ownerUserId is required for a personal discount code",
       ],
     },
-    percentage: { type: Number, required: true, min: 1, max: 100 },
-    maxDiscountAmount: { type: Number, validate: tomanValidator },
-    minOrderAmount: { type: Number, default: 0, validate: tomanValidator },
-    usageLimit: { type: Number, min: 1 },
+    percentage: { type: Number, required: true, min: 1, max: 100, validate: integerValidator("percentage") },
+    // Absent = no cap. A cap of 0 would silently disable the discount, so it is not a valid value.
+    maxDiscountAmount: { type: Number, min: 1, validate: tomanValidator },
+    minOrderAmount: { type: Number, default: 0, min: 0, validate: tomanValidator },
+    // Absent = unlimited (Owner decision, Phase 4 page 6). Never below usedCount — the service enforces that atomically.
+    usageLimit: { type: Number, min: 1, validate: integerValidator("usageLimit") },
     usedCount: { type: Number, default: 0, min: 0 },
     isActive: { type: Boolean, default: true },
     expiresAt: { type: Date },

@@ -7,3 +7,5 @@ export * from "./domain/delivery";
 export * from "./domain/category";
 export * from "./domain/siteContent";
 export * from "./domain/customer";
+export * from "./domain/discountCode";
+export * from "./tehranDate";
