@@ -8,4 +8,5 @@ export * from "./domain/category";
 export * from "./domain/siteContent";
 export * from "./domain/customer";
 export * from "./domain/discountCode";
+export * from "./domain/product";
 export * from "./tehranDate";

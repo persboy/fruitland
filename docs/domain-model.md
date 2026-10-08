@@ -50,7 +50,7 @@ Legacy یک سیستم آنلاین‌پرداخت کامل (ZarinPal) و کیف
 | **SystemState** | تعیین اتمیک اولین کاربر = MASTER_ADMIN | سیستم | Singleton | بله |
 | **Category** | دسته‌بندی محصول (قابل‌مدیریت در ادمین) | Admin | فعال↔غیرفعال، ترتیب | بله |
 | **Product** | کالای فروشگاه | Admin | فعال↔غیرفعال | بله |
-| ProductVariant *(subdoc)* | واحد فروش + قیمت + موجودی | Product | ندارد | نه — Embedded در Product |
+| ProductVariant *(subdoc)* | واحد فروش (`unit`) + قیمت (`price`، تومان صحیح ≥ ۱) + `isAvailable`. **موجودی/`stockQty`/`originalPrice` وجود ندارد** (مالکیت موجودی به فاز بعدی موکول شده) | Product | `isAvailable` (مستقل از `Product.isActive`)؛ حذف ندارد | نه — Embedded در Product |
 | **Order** | سفارش مشتری/تلفنی | User (customer) | preparing→shipped→delivered/cancelled/returned | بله |
 | OrderItem *(subdoc)* | آیتم سفارش (Snapshot قیمت/نام) | Order | ندارد | نه — Embedded |
 | OrderDelivery *(subdoc)* | تخصیص/تحویل پیک | Order | assigned→pickedUp→resolved | نه — Embedded |
@@ -90,7 +90,7 @@ User ──(referredByUserId)── User   [خودارجاع — فقط شناس
 Category ──< Product (categoryId)
 Product ──< OrderItem (productId, Snapshot)
 Product ──< Review (productId)
-Product >── ReviewAttribute (reviewAttributes: key[])
+(ارتباط Product ↔ ReviewAttribute هنوز پیاده‌سازی نشده؛ مدل Product فیلد `reviewAttributes` ندارد)
 
 Order ──< OrderItem (Embedded)
 Order ──(courierId)── User
@@ -178,6 +178,16 @@ pending → approved | rejected   (هر دو پایانی)
 - ثبت بازگشت فیزیکی کالا کاملاً جدا و اطلاعاتی است؛ هرگز مانع ساخت/تخصیص سفارش جایگزین نمی‌شود و run لغوشده را دوباره باز نمی‌کند. **فقط یک‌بار قابل ثبت است** — با یک نوشتن شرطی اتمیک (`physicalReturn: {$exists:false}`، نه خواندن-سپس-نوشتن)، پس حتی دو تلاش هم‌زمان فقط یکی موفق می‌شود؛ تلاش دوم خطای `EMERGENCY_CANCEL_PHYSICAL_RETURN_ALREADY_RECORDED` می‌گیرد و هیچ‌چیز از ثبت اول را تغییر نمی‌دهد.
 - Audit کامل از طریق `AuditLog` موجود (بدون مکانیزم audit دوم).
 
+### Product
+```
+active ⇄ inactive   (دستی توسط ادمین، فقط isActive؛ حذف سخت وجود ندارد)
+```
+- `Variant.isAvailable` سطح جدا و مستقل از `Product.isActive` است؛ غیرفعال/فعال‌کردن محصول هیچ variantی را تغییر نمی‌دهد. variant هرگز حذف نمی‌شود، فقط `isAvailable=false` می‌شود.
+- هر `unit` فقط یک‌بار در یک محصول؛ `price` عدد صحیح تومان ≥ ۱. `_id` هر variant پس از ساخت پایدار است (ویرایش آن را بازتولید نمی‌کند).
+- `slug` را سرور از نام می‌سازد (یونیکد/فارسی با خط‌تیره، پسوند عددی ASCII برای تکراری: `-2`، `-3`)، از کلاینت پذیرفته نمی‌شود و با تغییر نام عوض نمی‌شود.
+- ساخت محصول یا **انتقال** آن به دسته‌ی دیگر فقط به یک دسته‌ی **فعال** مجاز است؛ اگر دسته‌ای بعداً غیرفعال شود محصول تغییر نمی‌کند (بدون cascade).
+- `images` فقط آرایه‌ی رشته (URL) است؛ آپلود/Cloudinary/publicId و فیلدهای قدیمی (`emoji`، `origin`، …) در مدل نیستند.
+
 ### DiscountCode
 وضعیت **ذخیره نمی‌شود؛ از فیلدهای خود کد محاسبه می‌شود** (اولویت دقیق: `exhausted` > `disabled` > `expired` > `active`):
 ```
@@ -204,7 +214,7 @@ API قابل‌تغییر/تفویض نیست (طبق بخش ۱۷ Master Prompt)
 2. **Address Embedded در User، ولی Snapshot در Order** — آدرس فعلی کاربر برای نمایش/ویرایش
    Embedded می‌ماند؛ اما هر سفارش یک کپی مستقل از آدرس در لحظه‌ی ثبت نگه می‌دارد تا ویرایش بعدی
    آدرس، فاکتورهای قبلی را عوض نکند (بخش ۱۹ سند مدل‌سازی).
-3. **OrderItem همیشه Snapshot** — نام/قیمت/تصویر محصول در لحظه‌ی خرید کپی می‌شود؛ `productId`
+3. **OrderItem همیشه Snapshot** — نام/واحد/قیمت محصول در لحظه‌ی خرید کپی می‌شود (تصویر و `variantId` در `OrderItem` نیست؛ تغییر آن با فاز Orders است)؛ `productId`
    فقط برای لینک «مشاهده‌ی محصول» نگه داشته می‌شود و منبع قیمت تاریخی نیست.
 4. **DiscountCode با ارجاع متنی (`code`) نه ObjectId در Order** — چون کد تخفیف پس از استفاده هم
    باید در فاکتور «همان‌طور که بود» قابل نمایش بماند و تغییر بعدی رکورد تخفیف نباید تاریخچه را
@@ -240,7 +250,7 @@ API قابل‌تغییر/تفویض نیست (طبق بخش ۱۷ Master Prompt)
 | User | `referralCode` | اعتبارسنجی کد دعوت | بله (sparse) |
 | User | `{role, createdAt:-1}` | فهرست مشتریان ادمین (`role=customer`، جدیدترین اول) | خیر |
 | Category | `slug` | صفحه‌ی دسته‌بندی storefront | بله |
-| Product | `{category, isActive}` | لیست محصولات یک دسته | خیر |
+| Product | `{categoryId, isActive}` | لیست/فیلتر محصولات یک دسته | خیر |
 | Product | `name` (text) | جست‌وجوی محصول | خیر |
 | Order | `{userId, createdAt:-1}` | تاریخچه‌ی سفارش‌های مشتری | خیر |
 | Order | `{status, createdAt:-1}` | صف عملیاتی ادمین | خیر |

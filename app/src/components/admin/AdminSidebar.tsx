@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Layers, Leaf, Newspaper, Settings, TicketPercent, Users, X, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Layers, Leaf, Newspaper, Package, Settings, TicketPercent, Users, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ROLE_LABELS, displayNameOf, type SessionUser } from "@/lib/client/adminAuth";
 
@@ -17,6 +17,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/admin", label: "میز کار", icon: LayoutDashboard },
   { href: "/admin/categories", label: "دسته‌بندی‌ها", icon: Layers },
+  { href: "/admin/products", label: "محصولات", icon: Package },
   { href: "/admin/site-content", label: "محتوای سایت", icon: Newspaper },
   { href: "/admin/customers", label: "مشتریان", icon: Users },
   { href: "/admin/discounts", label: "کدهای تخفیف", icon: TicketPercent },

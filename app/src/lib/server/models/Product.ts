@@ -22,7 +22,8 @@ export interface IProductVariant {
 const productVariantSchema = new Schema<IProductVariant>(
   {
     unit: { type: String, enum: PRODUCT_UNITS, required: true },
-    price: { type: Number, required: true, min: 0, validate: tomanValidator },
+    // Zero is not a valid price (Owner decision, Phase 4 page 7): integer Toman >= 1.
+    price: { type: Number, required: true, min: 1, validate: tomanValidator },
     isAvailable: { type: Boolean, default: true },
   },
   { _id: true },
@@ -52,10 +53,18 @@ const productSchema = new Schema<IProduct>(
     sortOrder: { type: Number, default: 0 },
     variants: {
       type: [productVariantSchema],
-      validate: {
-        validator: (v: IProductVariant[]) => v.length > 0,
-        message: "Product must have at least one variant",
-      },
+      validate: [
+        {
+          validator: (v: IProductVariant[]) => v.length > 0,
+          message: "Product must have at least one variant",
+        },
+        {
+          // A product may offer each unit only once (Owner decision, Phase 4 page 7). The service validates the
+          // final merged list too and answers with a Persian 400; this is the model-level backstop.
+          validator: (v: IProductVariant[]) => new Set(v.map((x) => x.unit)).size === v.length,
+          message: "Product variants must have unique units",
+        },
+      ],
     },
   },
   baseSchemaOptions,

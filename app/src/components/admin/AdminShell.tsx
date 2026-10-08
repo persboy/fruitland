@@ -17,6 +17,7 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/admin/categories": { title: "دسته‌بندی‌ها", subtitle: "مدیریت دسته‌بندی محصولات" },
   "/admin/site-content": { title: "محتوای سایت", subtitle: "صفحات ثابت، سؤالات متداول، اسلایدها و شبکه‌های اجتماعی" },
   "/admin/customers": { title: "مشتریان", subtitle: "فهرست مشتریان، ویرایش پروفایل و وضعیت حساب" },
+  "/admin/products": { title: "محصولات", subtitle: "مدیریت محصولات، واحدهای فروش و قیمت‌ها" },
   "/admin/discounts": { title: "کدهای تخفیف", subtitle: "ساخت و مدیریت کدهای تخفیف عمومی و شخصی" },
   "/admin/settings": { title: "تنظیمات", subtitle: "مدیریت حساب، فروشگاه و ارسال" },
 };
