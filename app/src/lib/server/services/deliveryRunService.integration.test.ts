@@ -274,6 +274,8 @@ describe("activateRun (transactional — requires a replica set)", () => {
 
     const pickedUp = await Order.findById(a._id);
     expect(pickedUp?.delivery.status).toBe("picked_up");
+    expect(pickedUp?.status).toBe("shipped"); // Page 9: Order.status moves with physical pickup, atomically
+    expect((await Order.findById(b._id))?.status).toBe("shipped");
     expect(pickedUp?.delivery.pickedUpAt).toBeInstanceOf(Date); // Decision 2: a distinct, real physical-custody timestamp...
     expect(pickedUp?.delivery.assignedAt?.getTime()).toBe(assignedAtBefore); // ...that never touches assignedAt (Decision 1).
 

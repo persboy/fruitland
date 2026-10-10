@@ -117,14 +117,16 @@ shipped   → returned
 - `cancelled`: فقط از `preparing` مجاز است (سفارشِ درحال ارسال را نمی‌توان مستقیم کنسل کرد —
   این یک قانون کسب‌وکار حدس‌زده‌شده نیست، بلکه پیش‌فرض ایمن؛ **سؤال باز**، نگاه کنید بخش ۷).
 
+**به‌روزرسانی صفحه‌ی ۹ (Orders، تصمیم Owner):** `shipped` با **تأیید دریافت فیزیکی توسط پیک** (`confirmPickup`) ست می‌شود: `status: preparing → shipped` و `delivery.status: assigned → picked_up` در یک نوشتن شرطیِ تراکنشی (هر دو وضعیت در filter). لغو عادی (ادمین، دلیل اجباری): فقط `preparing` و `delivery.status = unassigned`، یک نوشتن شرطی؛ پس از pickup فقط Emergency Cancel. `delivered/returned` همچنان با تأیید نهایی ادمین است و **هنوز هیچ مسیری آن را نمی‌نویسد** (صفحه‌ی ۱۱ Delivery: تأیید ⇒ `resolved` + `Order.status`؛ رد ⇒ `proposed → picked_up`، بدون تأیید خودکار و بدون تغییر `isPaid/paidAt`). `isPaid/paidAt` را هیچ مسیری نمی‌نویسد.
+
 **Phase 14 Decision Review، Decision 3 (تأییدشده) — Option F:** مالکیت این چرخه هنوز به فاز رسمی Orders موکول است.
 - بند بالا («`shipped` فقط پس از `assignedAt`») یک **پیش‌شرط** (گارد) است، نه یک **trigger**. یعنی: بدون `assignedAt`، `shipped` ممکن نیست — ولی ست‌شدن `assignedAt` به‌خودی‌خود `Order.status` را به `shipped` تبدیل نمی‌کند.
 - **مالک، trigger دقیق، و بازیگر مجاز `Order.status`** (از جمله این‌که کدام رویداد — فعال‌سازی run، تحویل فیزیکی پیک، پیشنهاد پیک، یا تأیید نهایی ادمین — باعث `shipped` می‌شود) عمداً **حل نشده** و به فاز رسمی Orders (که هنوز پیاده نشده) موکول شده است.
-- در نتیجه: **`DeliveryRun` (فاز ۱۴) هیچ عملیاتی — `createDraftRun`, `addStopToDraft`, `removeStopFromDraft`, `reorderDraftStops`, `activateRun`, `confirmPickup`, `proposeStopOutcome`, `skipStop`, `cancelRun` — هرگز `Order.status` را نمی‌نویسد.** این دو زیرسیستم (`Order.status` و `Order.delivery`) مستقل باقی می‌مانند؛ هیچ همگام‌سازی ضمنی بین آن‌ها معرفی نشده است.
+- در نتیجه (به‌روز شده در صفحه‌ی ۹): **`DeliveryRun` هیچ عملیاتی — `createDraftRun`, `addStopToDraft`, `removeStopFromDraft`, `reorderDraftStops`, `activateRun`, `proposeStopOutcome`, `skipStop`, `cancelRun`، emergency cancel — `Order.status` را نمی‌نویسد؛ تنها استثنا `confirmPickup` است (preparing → shipped، اتمیک با `delivery.status`).** این دو زیرسیستم (`Order.status` و `Order.delivery`) مستقل باقی می‌مانند؛ هیچ همگام‌سازی ضمنی بین آن‌ها معرفی نشده است.
 
 ### Order.delivery (زیرسیستم مستقل از status)
 ```
-(خالی) → assignmentRequested → assigned → pickedUp → proposed(delivered|returned) → resolved
+unassigned → assigned → picked_up → proposed(delivered|returned) → resolved   (و picked_up → emergency_cancelled؛ assigned → unassigned هنگام آزادسازی)
 ```
 انتقال آخر (`resolved`) فقط توسط ادمین انجام می‌شود؛ لحظه‌ی `resolvedAt` مبنای گزارش عملکرد پیک است.
 
@@ -255,7 +257,8 @@ API قابل‌تغییر/تفویض نیست (طبق بخش ۱۷ Master Prompt)
 | Product | `name` (text) | جست‌وجوی محصول | خیر |
 | Order | `{userId, createdAt:-1}` | تاریخچه‌ی سفارش‌های مشتری | خیر |
 | Order | `{status, createdAt:-1}` | صف عملیاتی ادمین | خیر |
-| Order | `{courierId, status}` | سفارش‌های فعال یک پیک | خیر |
+| Order | `{delivery.courierId, delivery.status}` | سفارش‌های فعال یک پیک | خیر |
+| Order | `{createdAt:-1}` | فهرست ادمین «جدیدترین» بدون فیلتر (صفحه‌ی ۹) | خیر |
 | Order | `orderNumber` | جست‌وجوی سفارش با شماره‌ی نمایشی | بله |
 | DiscountCode | `code` | اعتبارسنجی کد در چک‌اوت | بله |
 | Review | `{orderId, productId}` | جلوگیری از نظر تکراری روی یک خرید | بله |

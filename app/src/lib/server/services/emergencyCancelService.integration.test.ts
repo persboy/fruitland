@@ -85,7 +85,7 @@ describe("Emergency Cancel (integration, replica set)", () => {
     const originalAfter = await Order.findById(original._id);
     expect(originalAfter?.delivery.status).toBe("emergency_cancelled");
     expect(originalAfter?.delivery.emergencyCancelledAt).toBeInstanceOf(Date);
-    expect(originalAfter?.status).toBe("preparing"); // Decision 3: Order.status untouched
+    expect(originalAfter?.status).toBe("shipped"); // Page 9: confirmPickup set shipped; Emergency Cancel itself leaves Order.status untouched
 
     const replacement = await Order.findById(reviewed.replacementOrderIds[0]);
     expect(replacement).not.toBeNull();

@@ -193,6 +193,14 @@ const orderSchema = new Schema<IOrder>(
 
 orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
+/**
+ * Page 9 (admin Orders list): the default list is "newest first" with NO filter (or only a
+ * delivery-status / source filter), which none of the indexes above can serve — without this a
+ * full collection would be sorted in memory on every page load. Status-filtered lists keep using
+ * `{status, createdAt}`. One small single-field index; no other new index was needed (order-number
+ * search uses the unique `orderNumber` index, customer search resolves through `User`).
+ */
+orderSchema.index({ createdAt: -1 });
 orderSchema.index({ "delivery.courierId": 1, "delivery.status": 1 });
 /** Finding the Replacement Order(s) for an original order (Phase 14 Emergency Cancel). Sparse: most orders never set this field. */
 orderSchema.index({ replacesOrderId: 1 }, { sparse: true });

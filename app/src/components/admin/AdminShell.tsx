@@ -19,6 +19,7 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/admin/customers": { title: "مشتریان", subtitle: "فهرست مشتریان، ویرایش پروفایل و وضعیت حساب" },
   "/admin/products": { title: "محصولات", subtitle: "مدیریت محصولات، واحدهای فروش و قیمت‌ها" },
   "/admin/discounts": { title: "کدهای تخفیف", subtitle: "ساخت و مدیریت کدهای تخفیف عمومی و شخصی" },
+  "/admin/orders": { title: "سفارش‌ها", subtitle: "فهرست سفارش‌ها، وضعیت تحویل و لغو" },
   "/admin/couriers": { title: "پیک‌ها", subtitle: "تبدیل مشتری به پیک، مشخصات وسیله و وضعیت حساب" },
   "/admin/settings": { title: "تنظیمات", subtitle: "مدیریت حساب، فروشگاه و ارسال" },
 };
@@ -104,7 +105,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   const meta =
     pageMeta[pathname] ??
-    (pathname.startsWith("/admin/customers/") ? { title: "جزئیات مشتری", subtitle: "پروفایل و وضعیت حساب" } : { title: "پنل مدیریت", subtitle: "" });
+    (pathname.startsWith("/admin/customers/")
+      ? { title: "جزئیات مشتری", subtitle: "پروفایل و وضعیت حساب" }
+      : pathname.startsWith("/admin/orders/")
+        ? { title: "جزئیات سفارش", subtitle: "اقلام، مبالغ، وضعیت تحویل و لغو" }
+        : { title: "پنل مدیریت", subtitle: "" });
   const updateUser = (patch: Partial<SessionUser>) =>
     setState((prev) => (prev.status === "ok" ? { status: "ok", user: { ...prev.user, ...patch } } : prev));
   return (

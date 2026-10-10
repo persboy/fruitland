@@ -625,8 +625,10 @@ describe("confirmPickup — Decision 2: an explicit, courier-only, physical-cust
     expect(m.orderUpdateOne).toHaveBeenCalledTimes(2);
     for (const [filter, update, options] of m.orderUpdateOne.mock.calls) {
       expect(filter["delivery.status"]).toBe("assigned");
+      expect(filter.status).toBe("preparing"); // Page 9: both expected states are pinned in the filter
       expect(filter["delivery.courierId"].equals(courierId)).toBe(true);
       expect(update.$set["delivery.status"]).toBe("picked_up");
+      expect(update.$set.status).toBe("shipped"); // Page 9: atomic with delivery.status, same write, same session
       expect((update.$set["delivery.pickedUpAt"] as Date).getTime()).toBeGreaterThanOrEqual(before);
       expect(Object.keys(update.$set)).not.toContain("delivery.assignedAt");
       expect(options).toHaveProperty("session");
@@ -854,7 +856,12 @@ describe("Decision 3 (approved, Option F): DeliveryRun never mutates Order.statu
       const update = call[1] as { $set?: Record<string, unknown>; $unset?: Record<string, unknown> };
       for (const mutation of [update.$set, update.$unset]) {
         if (!mutation) continue;
-        expect(Object.keys(mutation)).not.toContain("status");
+        // Page 9 (Owner decision): the ONLY Order.status write any DeliveryRun operation may make is
+        // confirmPickup's atomic preparing → shipped together with delivery.status picked_up.
+        if (Object.keys(mutation).includes("status")) {
+          expect(mutation).toMatchObject({ status: "shipped", "delivery.status": "picked_up" });
+          expect(call[0]).toMatchObject({ status: "preparing", "delivery.status": "assigned" });
+        }
         for (const key of Object.keys(mutation)) {
           expect(key === "status" || key.startsWith("delivery.")).toBe(true);
         }

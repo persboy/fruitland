@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bike, LayoutDashboard, Layers, Leaf, Newspaper, Package, Settings, TicketPercent, Users, X, type LucideIcon } from "lucide-react";
+import { Bike, ShoppingBag, LayoutDashboard, Layers, Leaf, Newspaper, Package, Settings, TicketPercent, Users, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ROLE_LABELS, displayNameOf, type SessionUser } from "@/lib/client/adminAuth";
 
@@ -21,6 +21,7 @@ const navItems: NavItem[] = [
   { href: "/admin/site-content", label: "محتوای سایت", icon: Newspaper },
   { href: "/admin/customers", label: "مشتریان", icon: Users },
   { href: "/admin/discounts", label: "کدهای تخفیف", icon: TicketPercent },
+  { href: "/admin/orders", label: "سفارش‌ها", icon: ShoppingBag },
   { href: "/admin/couriers", label: "پیک‌ها", icon: Bike },
   { href: "/admin/settings", label: "تنظیمات", icon: Settings },
 ];

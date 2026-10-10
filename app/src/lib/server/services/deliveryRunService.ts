@@ -618,6 +618,9 @@ export async function cancelRun(actor: AuthContext, runId: string, hooks?: Trans
  *
  * Applies to all still-pending stops in one call and is idempotent (a stop
  * already past "pending" is simply not touched again).
+ *
+ * Page 9: this is also the (only) trigger of `Order.status` preparing → shipped,
+ * written atomically with `delivery.status: picked_up` — see the write below.
  */
 export async function confirmPickup(
   actor: AuthContext,
@@ -682,9 +685,13 @@ export async function confirmPickup(
         .map((stopId) => stopsById.get(stopId.toString())!)
         .sort((a, b) => a.sequence - b.sequence);
       for (const stop of pending) {
+        // Page 9 (Owner decision): physical pickup is THE event that moves Order.status
+        // preparing → shipped. Both fields change in this one conditional write inside the
+        // transaction, and the filter pins BOTH expected states, so a concurrent order
+        // cancellation / skip / release can never leave `status` and `delivery.status` disagreeing.
         const result = await Order.updateOne(
-          { _id: stop.orderId, "delivery.status": "assigned", "delivery.courierId": run.courierId },
-          { $set: { "delivery.status": "picked_up", "delivery.pickedUpAt": new Date() } },
+          { _id: stop.orderId, status: "preparing", "delivery.status": "assigned", "delivery.courierId": run.courierId },
+          { $set: { status: "shipped", "delivery.status": "picked_up", "delivery.pickedUpAt": new Date() } },
           { session },
         );
         if (result.modifiedCount === 1) {
