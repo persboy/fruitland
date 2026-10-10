@@ -24,7 +24,20 @@ type Result = { key: string; items: CustomerListItemDto[] } | { key: string; err
  * (`GET /admin/customers?search=&status=active`) — only active customers are offered,
  * and the server re-checks role + isActive when the code is created.
  */
-export function OwnerPicker({ value, onChange }: { value: PickedOwner | null; onChange: (owner: PickedOwner | null) => void }) {
+export function OwnerPicker({
+  value,
+  onChange,
+  heading = "مشتری مالک کد",
+  searchLabel = "مشتری مالک کد (جست‌وجوی نام یا شماره موبایل)",
+  inputId = "discount-owner-search",
+}: {
+  value: PickedOwner | null;
+  onChange: (owner: PickedOwner | null) => void;
+  /** Reused by Couriers (Page 8) for choosing the customer to promote; the defaults are the Discounts wording. */
+  heading?: string;
+  searchLabel?: string;
+  inputId?: string;
+}) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [result, setResult] = useState<Result | null>(null);
@@ -53,7 +66,7 @@ export function OwnerPicker({ value, onChange }: { value: PickedOwner | null; on
   if (value) {
     return (
       <div>
-        <p className="mb-1 text-xs font-medium text-gray-500">مشتری مالک کد</p>
+        <p className="mb-1 text-xs font-medium text-gray-500">{heading}</p>
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
           <UserCheck className="h-4 w-4 text-emerald-600" aria-hidden="true" />
           <span className="text-sm font-semibold text-gray-800">{value.label}</span>
@@ -68,13 +81,13 @@ export function OwnerPicker({ value, onChange }: { value: PickedOwner | null; on
   const settled = trimmed !== "" && result !== null && result.key === trimmed;
   return (
     <div>
-      <label htmlFor="discount-owner-search" className="mb-1 block text-xs font-medium text-gray-500">
-        مشتری مالک کد (جست‌وجوی نام یا شماره موبایل)
+      <label htmlFor={inputId} className="mb-1 block text-xs font-medium text-gray-500">
+        {searchLabel}
       </label>
       <div className="relative">
         <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" aria-hidden="true" />
         <input
-          id="discount-owner-search"
+          id={inputId}
           type="search"
           value={query}
           maxLength={50}

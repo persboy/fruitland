@@ -155,6 +155,8 @@ class OrderNotEligibleError extends Error {
 }
 /** Internal control-flow marker: the run itself was no longer a draft by the time the transaction tried to flip it. */
 class RunChangedDuringActivationError extends Error {}
+/** Internal control-flow marker: the courier is no longer an active courier account (deactivated / role changed) at the moment of activation. */
+class CourierNotActiveError extends Error {}
 /** Internal control-flow marker: the service-level pre-check (not the authoritative guard — see the courierId partial unique index) found another active run for this courier. */
 class CourierAlreadyHasActiveRunError extends Error {}
 
@@ -392,6 +394,21 @@ export async function activateRun(actor: AuthContext, runId: string): Promise<De
       const otherActiveRun = await DeliveryRun.exists({ courierId: draft.courierId, status: "active" }).session(session);
       if (otherActiveRun) throw new CourierAlreadyHasActiveRunError();
 
+      // Courier eligibility is re-checked at activation (Page 8). This is a
+      // WRITE on the courier's User document (not a plain read) on purpose:
+      // `courierService.setCourierActive(false)` writes the same document
+      // inside its own transaction, so a deactivation racing this activation
+      // is a write-write conflict that MongoDB retries against fresh state —
+      // either this run is already active (deactivation → 409) or the courier
+      // is already inactive (→ COURIER_NOT_ACTIVE below). A read alone would
+      // let both transactions commit (snapshot isolation write skew).
+      const courierGuard = await User.updateOne(
+        { _id: draft.courierId, role: "courier", isActive: true },
+        { $set: { updatedAt: now } },
+        { session },
+      );
+      if (courierGuard.matchedCount !== 1) throw new CourierNotActiveError();
+
       for (const stop of draft.stops) {
         const result = await Order.updateOne(
           { _id: stop.orderId, status: "preparing", "delivery.status": "unassigned" },
@@ -413,6 +430,9 @@ export async function activateRun(actor: AuthContext, runId: string): Promise<De
         "این پیک هم‌اکنون یک ماموریت فعال دیگر دارد؛ ابتدا آن را تکمیل یا لغو کنید",
         "COURIER_ALREADY_HAS_ACTIVE_RUN",
       );
+    }
+    if (error instanceof CourierNotActiveError) {
+      throw AppError.conflict("حساب این پیک غیرفعال است؛ ماموریت فعال نمی‌شود", "COURIER_NOT_ACTIVE");
     }
     if (error instanceof OrderNotEligibleError) {
       throw AppError.conflict(

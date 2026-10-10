@@ -19,6 +19,7 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/admin/customers": { title: "مشتریان", subtitle: "فهرست مشتریان، ویرایش پروفایل و وضعیت حساب" },
   "/admin/products": { title: "محصولات", subtitle: "مدیریت محصولات، واحدهای فروش و قیمت‌ها" },
   "/admin/discounts": { title: "کدهای تخفیف", subtitle: "ساخت و مدیریت کدهای تخفیف عمومی و شخصی" },
+  "/admin/couriers": { title: "پیک‌ها", subtitle: "تبدیل مشتری به پیک، مشخصات وسیله و وضعیت حساب" },
   "/admin/settings": { title: "تنظیمات", subtitle: "مدیریت حساب، فروشگاه و ارسال" },
 };
 

@@ -270,6 +270,7 @@ describe("activateRun — the one transactional, all-or-nothing operation", () =
     m.runFindById.mockResolvedValue(run);
     m.startSession.mockResolvedValue(fakeSession());
     m.runExists.mockResolvedValue(null); // no other active run for this courier, by default
+    m.userUpdateOne.mockResolvedValue({ matchedCount: 1 }); // the courier is an active courier account, by default
     return run;
   }
 
@@ -315,6 +316,27 @@ describe("activateRun — the one transactional, all-or-nothing operation", () =
     );
     // Only the two orders up to (and including) the failing one were attempted; the run was never flipped.
     expect(m.orderUpdateOne).toHaveBeenCalledTimes(2);
+    expect(m.runUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("Page 8: re-checks the courier's CURRENT account state inside the transaction with a conditional WRITE on the courier's User (so it conflicts with a concurrent deactivation)", async () => {
+    const run = arrangeDraft([{ orderId: id() }]);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "active" });
+    await activateRun(admin, run._id.toString());
+    const [filter, update, options] = m.userUpdateOne.mock.calls[0]!;
+    expect(filter).toEqual({ _id: courierId, role: "courier", isActive: true });
+    expect(update.$set.updatedAt).toBeInstanceOf(Date);
+    expect(options).toHaveProperty("session");
+    expect(m.userUpdateOne.mock.invocationCallOrder[0]!).toBeLessThan(m.orderUpdateOne.mock.invocationCallOrder[0]!);
+  });
+
+  it("Page 8: a deactivated (or no-longer-courier) courier cannot activate a run — 409 COURIER_NOT_ACTIVE, no order touched, no flip", async () => {
+    arrangeDraft([{ orderId: id() }, { orderId: id() }]);
+    m.userUpdateOne.mockResolvedValue({ matchedCount: 0 });
+    await expectAppError(activateRun(admin, id().toString()), "COURIER_NOT_ACTIVE", 409);
+    expect(m.orderUpdateOne).not.toHaveBeenCalled();
     expect(m.runUpdateOne).not.toHaveBeenCalled();
   });
 
@@ -846,6 +868,7 @@ describe("Decision 3 (approved, Option F): DeliveryRun never mutates Order.statu
     m.startSession.mockResolvedValue(fakeSession());
     m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
     m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.userUpdateOne.mockResolvedValue({ matchedCount: 1 }); // Page 8 courier-eligibility guard
     await activateRun(admin, run._id.toString());
     assertNoOrderStatusWrites();
   });
@@ -972,8 +995,8 @@ describe("Decision 5 (approved): courier availability is deferred — courierPro
   it.each(["offline", "online", "busy"] as const)(
     "activateRun succeeds regardless of the courier's courierProfile.status ('%s') — offline does not block it, online/busy grant nothing special",
     async (status) => {
-      // activateRun never loads the courier's User document at all (see below) —
-      // 'status' here only documents which value this scenario represents.
+      // activateRun never READS the courier's User document (it only runs the Page 8 account-state
+      // guard below) — 'status' here only documents which value this scenario represents.
       void status;
       const run = { _id: id(), courierId, status: "draft", stops: [{ _id: id(), orderId: id(), sequence: 1, status: "pending" }] };
       m.runFindById.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, status: "active" });
@@ -981,14 +1004,17 @@ describe("Decision 5 (approved): courier availability is deferred — courierPro
       m.runExists.mockResolvedValue(null);
       m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
       m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      m.userUpdateOne.mockResolvedValue({ matchedCount: 1 });
 
       const active = await activateRun(admin, run._id.toString());
       expect(active.status).toBe("active");
       expect(m.userFindOne).not.toHaveBeenCalled();
+      // Page 8: the only User access is the account-state guard — it never filters on courierProfile.status.
+      expect(m.userUpdateOne.mock.calls[0]![0]).toEqual({ _id: courierId, role: "courier", isActive: true });
     },
   );
 
-  it("no DeliveryRun operation ever writes to the User collection (courierProfile.status is never mutated)", async () => {
+  it("no DeliveryRun operation ever mutates courierProfile.status — the ONLY User write is activateRun's account-state guard, which touches updatedAt alone", async () => {
     // A representative sweep across admin- and courier-facing operations, including
     // activation (the one place Decisions 1 and 4 write real state).
     const orderId = id();
@@ -1004,6 +1030,7 @@ describe("Decision 5 (approved): courier availability is deferred — courierPro
     m.runExists.mockResolvedValue(null);
     m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
     m.runUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    m.userUpdateOne.mockResolvedValue({ matchedCount: 1 });
     await activateRun(admin, draftId.toString());
 
     const activeRun = makeRun([{ seq: 1 }]);
@@ -1012,7 +1039,9 @@ describe("Decision 5 (approved): courier availability is deferred — courierPro
     m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
     await confirmPickup(courier, activeRun._id.toString());
 
-    expect(m.userUpdateOne).not.toHaveBeenCalled();
+    // Exactly one User write happened (activateRun's guard), and it can only set updatedAt.
+    expect(m.userUpdateOne).toHaveBeenCalledTimes(1);
+    expect(Object.keys(m.userUpdateOne.mock.calls[0]![1].$set)).toEqual(["updatedAt"]);
     expect(m.userUpdateMany).not.toHaveBeenCalled();
   });
 
