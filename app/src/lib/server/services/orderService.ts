@@ -1,9 +1,10 @@
-import { Types } from "mongoose";
+import { Types, startSession } from "mongoose";
 import type { OrderDetailDto, OrderLinkDto, OrderListItemDto, OrderListQuery, OrderListResult } from "@fruitland/shared";
 import { AppError } from "../errors/AppError";
 import { AuditLog } from "../models/AuditLog";
 import { Order, type IOrder } from "../models/Order";
 import { User } from "../models/User";
+import { isTransactionsUnsupportedError } from "./deliveryRunService";
 
 /**
  * Admin Orders (MASTER-PROMPT §39 Phase 4, page 9): list, read-only detail and ordinary
@@ -241,33 +242,71 @@ export async function getOrder(id: string): Promise<OrderDetailDto> {
 }
 
 /**
- * Ordinary cancellation (Owner decision, page 9). ONE conditional write whose FILTER pins both
- * expected states — `status: "preparing"` AND `delivery.status: "unassigned"` — so it can never
- * interleave with `activateRun` (which claims `preparing`+`unassigned` orders with the same
- * kind of conditional write) or `confirmPickup` (which needs `assigned`): whichever wins, the
- * other matches nothing and is rejected cleanly (409). No find-then-save.
+ * Ordinary cancellation (Owner decision, page 9; atomic audit — page 9.5). ONE conditional write
+ * whose FILTER pins both expected states — `status: "preparing"` AND `delivery.status:
+ * "unassigned"` — so it can never interleave with `activateRun` (which claims `preparing`+
+ * `unassigned` orders with the same kind of conditional write) or `confirmPickup` (which needs
+ * `assigned`): the other side matches nothing and is rejected cleanly (409). No find-then-save.
+ *
+ * The order write and its AuditLog entry are ONE MongoDB transaction (same session): if the audit
+ * insert fails the cancellation is rolled back, and when the conditional write matches nothing no
+ * audit is created. A write conflict with a concurrent `activateRun` (both touch the same order
+ * document) is a TransientTransactionError that `withTransaction` retries against fresh state, so
+ * exactly one of the two wins. Like every other multi-document operation here it needs a replica
+ * set / mongos; on a standalone mongod it throws a plain Error (logged 500) and NEVER falls back to
+ * a non-atomic write + audit.
  *
  * It deliberately refuses an order that is already in a run (`assigned`, `picked_up`, `proposed`,
  * `resolved`, `emergency_cancelled`) — those go through the delivery workflow (and Emergency
  * Cancel after pickup), never through this route — and never touches any DeliveryRun.
  * `isPaid`, `paidAt`, discount usage and every delivery field are left alone.
- *
- * The AuditLog entry follows the write (same pattern as the other single-document admin
- * services); it is written only for a cancellation that actually happened.
  */
 export async function cancelOrder(actorUserId: string, id: string, reason: string): Promise<OrderDetailDto> {
   if (!Types.ObjectId.isValid(id)) throw ORDER_NOT_FOUND();
   const _id = new Types.ObjectId(id);
   const actor = new Types.ObjectId(actorUserId);
 
-  const before = await Order.findOneAndUpdate(
-    { _id, status: "preparing", "delivery.status": "unassigned" },
-    { $set: { status: "cancelled", cancelReason: reason, canceledAt: new Date(), canceledByUserId: actor } },
-    { new: false, runValidators: true, projection: { status: 1 } },
-  ).lean<{ status: string } | null>();
+  const outcome: { cancelled: boolean } = { cancelled: false };
+  const session = await startSession();
+  try {
+    await session.withTransaction(async () => {
+      outcome.cancelled = false; // the callback may be retried on a transient error: start from a clean slate
+      const before = await Order.findOneAndUpdate(
+        { _id, status: "preparing", "delivery.status": "unassigned" },
+        { $set: { status: "cancelled", cancelReason: reason, canceledAt: new Date(), canceledByUserId: actor } },
+        { new: false, runValidators: true, projection: { status: 1 }, session },
+      ).lean<{ status: string } | null>();
+      if (!before) return; // lost the race / never eligible: nothing written, so nothing is audited
+      await AuditLog.create(
+        [
+          {
+            actorUserId: actor,
+            action: "order.cancelled",
+            entityType: "Order",
+            entityId: _id,
+            before: { status: before.status },
+            after: { status: "cancelled", cancelReason: reason },
+          },
+        ],
+        { session },
+      );
+      outcome.cancelled = true;
+    });
+  } catch (error) {
+    if (isTransactionsUnsupportedError(error)) {
+      throw new Error(
+        "لغو سفارش به یک تراکنش MongoDB نیاز دارد که این استقرار (mongod مستقل، نه replica set/mongos) از آن پشتیبانی نمی‌کند. " +
+          "عمداً بدون تراکنش انجام نشد تا ثبت لغو و audit جدا از هم commit نشوند.",
+        { cause: error },
+      );
+    }
+    throw error;
+  } finally {
+    await session.endSession();
+  }
 
-  if (!before) {
-    // Lost the race or never eligible: report the CURRENT reason; nothing was written.
+  if (!outcome.cancelled) {
+    // Nothing was written: report the CURRENT reason.
     const fresh = await Order.findById(_id, { status: 1, "delivery.status": 1 }).lean<{ status: string; delivery?: { status?: string } } | null>();
     if (!fresh) throw ORDER_NOT_FOUND();
     if (fresh.status === "cancelled") throw AppError.conflict("این سفارش قبلاً لغو شده است", "ORDER_ALREADY_CANCELLED");
@@ -279,14 +318,5 @@ export async function cancelOrder(actorUserId: string, id: string, reason: strin
       "ORDER_IN_DELIVERY",
     );
   }
-
-  await AuditLog.create({
-    actorUserId: actor,
-    action: "order.cancelled",
-    entityType: "Order",
-    entityId: _id,
-    before: { status: before.status },
-    after: { status: "cancelled", cancelReason: reason },
-  });
   return getOrder(id);
 }

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Types } from "mongoose";
 import { startTestReplSetDb, stopTestReplSetDb, clearTestReplSetDb } from "../models/testDbReplSet";
 import { AuditLog } from "../models/AuditLog";
@@ -92,6 +92,43 @@ describe("cancelOrder (real MongoDB)", () => {
       await clearTestReplSetDb();
     }
   }, 120_000);
+
+  it("Page 9.5: if the AuditLog insert fails inside the transaction, the cancellation is rolled back (order stays preparing, no audit)", async () => {
+    await seedPeople();
+    const o = await makeOrder();
+    const spy = vi.spyOn(AuditLog, "create").mockRejectedValueOnce(new Error("audit failed"));
+    await expect(cancelOrder(admin.userId, o._id.toString(), "x")).rejects.toThrow("audit failed");
+    spy.mockRestore();
+    expect(await Order.findById(o._id).lean()).toMatchObject({ status: "preparing", delivery: { status: "unassigned" } });
+    expect((await Order.findById(o._id).lean())?.cancelReason).toBeUndefined();
+    expect(await AuditLog.countDocuments({ action: "order.cancelled" })).toBe(0);
+  });
+
+  it("Page 9.5: cancel vs confirmPickup — an assigned order can never be cancelled here, whichever runs first; pickup always wins", async () => {
+    for (let i = 0; i < 6; i += 1) {
+      await seedPeople().catch(() => undefined);
+      const o = await makeOrder();
+      const draft = await createDraftRun(admin, { courierId: courier.userId, orderIds: [o._id.toString()] });
+      const active = await activateRun(admin, draft.id);
+      const [cancelResult, pickupResult] = await Promise.allSettled([cancelOrder(admin.userId, o._id.toString(), "x"), confirmPickup(courier, active.id)]);
+      expect(cancelResult.status).toBe("rejected");
+      expect(pickupResult.status).toBe("fulfilled");
+      expect(await Order.findById(o._id).lean()).toMatchObject({ status: "shipped", delivery: { status: "picked_up" } });
+      expect(await AuditLog.countDocuments({ action: "order.cancelled" })).toBe(0);
+      await clearTestReplSetDb();
+    }
+  }, 120_000);
+
+  it("Page 9.5: confirmPickup is all-or-nothing — if one assigned order is no longer 'preparing', the whole pickup rolls back (no partial shipped/picked_up)", async () => {
+    await seedPeople();
+    const [a, b] = [await makeOrder(), await makeOrder()];
+    const draft = await createDraftRun(admin, { courierId: courier.userId, orderIds: [a._id.toString(), b._id.toString()] });
+    const active = await activateRun(admin, draft.id);
+    await Order.updateOne({ _id: b._id }, { $set: { status: "cancelled" } }); // simulated inconsistent state
+    await expect(confirmPickup(courier, active.id)).rejects.toMatchObject({ status: 409, code: "ORDER_NOT_ASSIGNED" });
+    expect(await Order.findById(a._id).lean()).toMatchObject({ status: "preparing", delivery: { status: "assigned" } });
+    expect(await Order.findById(b._id).lean()).toMatchObject({ status: "cancelled", delivery: { status: "assigned" } });
+  });
 
   it("confirmPickup moves Order.status to shipped atomically with delivery.status, and the order is then not cancellable here", async () => {
     await seedPeople();

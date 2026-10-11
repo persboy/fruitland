@@ -645,6 +645,31 @@ describe("confirmPickup — Decision 2: an explicit, courier-only, physical-cust
     // (Rollback of the first stop's write is the real transaction's job — asserted in the integration test.)
   });
 
+  it("Page 9.5: an order that is still 'assigned' but no longer 'preparing' (e.g. cancelled by another path) is NOT picked up — the status filter matches nothing and the whole pickup aborts", async () => {
+    const run = makeRun([{ seq: 1 }]);
+    m.runFindOne.mockResolvedValue(run);
+    m.startSession.mockResolvedValue(fakeSession());
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+    m.orderFindOne.mockResolvedValue({ delivery: { status: "assigned", courierId } });
+    await expectAppError(confirmPickup(courier, run._id.toString()), "ORDER_NOT_ASSIGNED", 409);
+    expect(m.orderUpdateOne.mock.calls[0]![0]).toMatchObject({ status: "preparing", "delivery.status": "assigned" });
+  });
+
+  it("Page 9.5: every pickup write is conditional on BOTH states and carries the transaction session, so nothing is written outside the transaction", async () => {
+    const run = makeRun([{ seq: 1 }, { seq: 2 }]);
+    m.runFindOne.mockResolvedValue(run);
+    const session = fakeSession();
+    m.startSession.mockResolvedValue(session);
+    m.orderUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    await confirmPickup(courier, run._id.toString());
+    for (const [filter, update, options] of m.orderUpdateOne.mock.calls) {
+      expect(filter).toMatchObject({ status: "preparing", "delivery.status": "assigned" });
+      expect(update.$set).toMatchObject({ status: "shipped", "delivery.status": "picked_up" });
+      expect(options.session).toBeDefined();
+    }
+    expect(m.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
   /** Mimics ONLY the driver contract: re-run the callback while the error carries TransientTransactionError. */
   function retryingSession() {
     return {

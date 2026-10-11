@@ -3,8 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   orderFind: vi.fn(), orderCount: vi.fn(), orderFindById: vi.fn(), orderFindOneAndUpdate: vi.fn(),
-  userFind: vi.fn(), auditCreate: vi.fn(),
+  userFind: vi.fn(), auditCreate: vi.fn(), startSession: vi.fn(),
 }));
+vi.mock("mongoose", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("mongoose")>();
+  return { ...actual, startSession: m.startSession };
+});
+vi.mock("./deliveryRunService", () => ({ isTransactionsUnsupportedError: (e: { code?: number }) => e?.code === 20 }));
 vi.mock("../models/Order", () => ({
   Order: { find: m.orderFind, countDocuments: m.orderCount, findById: m.orderFindById, findOneAndUpdate: m.orderFindOneAndUpdate },
 }));
@@ -158,26 +163,81 @@ describe("getOrder", () => {
   });
 });
 
+/** Mimics the driver contract only: runs the callback; an error thrown inside means the transaction aborted (rolled back). */
+function fakeSession() {
+  const session = {
+    aborted: false,
+    committed: false,
+    ended: false,
+    withTransaction: async (fn: () => Promise<void>) => {
+      try {
+        await fn();
+        session.committed = true;
+      } catch (e) {
+        session.aborted = true;
+        throw e;
+      }
+    },
+    endSession: async () => {
+      session.ended = true;
+    },
+  };
+  return session;
+}
+
 describe("cancelOrder", () => {
   const id = new Types.ObjectId();
-
-  it("ONE conditional write pinned to preparing + unassigned; records reason/time/actor; audits once", async () => {
-    m.orderFindOneAndUpdate.mockReturnValue(lean({ status: "preparing" }));
-    const o = detailOrder({ _id: id, status: "cancelled", cancelReason: "r" });
-    m.orderFindById.mockReturnValue(lean(o));
+  const arrangeDetail = () => {
+    m.orderFindById.mockReturnValue(lean(detailOrder({ _id: id, status: "cancelled", cancelReason: "r" })));
     m.orderFind.mockReturnValue({ sort: () => lean([]) });
     m.userFind.mockReturnValue(lean([]));
+  };
+
+  it("ONE conditional write pinned to preparing + unassigned, with the SAME session as the audit insert; records reason/time/actor; audits once; commits", async () => {
+    const session = fakeSession();
+    m.startSession.mockResolvedValue(session);
+    m.orderFindOneAndUpdate.mockReturnValue(lean({ status: "preparing" }));
+    arrangeDetail();
     await cancelOrder(actor, id.toString(), "r");
     const [filter, update, options] = m.orderFindOneAndUpdate.mock.calls[0]!;
     expect(filter).toEqual({ _id: id, status: "preparing", "delivery.status": "unassigned" });
     expect(Object.keys(update.$set).sort()).toEqual(["canceledAt", "canceledByUserId", "cancelReason", "status"].sort());
     expect(update.$set).toMatchObject({ status: "cancelled", cancelReason: "r" });
+    expect(update.$set.canceledAt).toBeInstanceOf(Date);
     expect(update.$set.canceledByUserId.toString()).toBe(actor);
     expect(options).toMatchObject({ new: false, runValidators: true });
-    // never touches payment / delivery / discount fields
+    expect(options.session).toBe(session);
     expect(JSON.stringify(update)).not.toMatch(/isPaid|paidAt|delivery|usedCount/);
     expect(m.auditCreate).toHaveBeenCalledTimes(1);
-    expect(m.auditCreate.mock.calls[0]![0]).toMatchObject({ action: "order.cancelled", entityType: "Order", entityId: id, before: { status: "preparing" }, after: { status: "cancelled", cancelReason: "r" } });
+    const [docs, auditOptions] = m.auditCreate.mock.calls[0]!;
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ action: "order.cancelled", entityType: "Order", entityId: id, before: { status: "preparing" }, after: { status: "cancelled", cancelReason: "r" } });
+    expect(docs[0].actorUserId.toString()).toBe(actor);
+    expect(auditOptions.session).toBe(session); // same transaction
+    expect(session.committed).toBe(true);
+    expect(session.ended).toBe(true);
+  });
+
+  it("if the audit insert fails, the transaction aborts (the cancellation is not committed) and the error surfaces", async () => {
+    const session = fakeSession();
+    m.startSession.mockResolvedValue(session);
+    m.orderFindOneAndUpdate.mockReturnValue(lean({ status: "preparing" }));
+    m.auditCreate.mockRejectedValue(new Error("audit write failed"));
+    await expect(cancelOrder(actor, id.toString(), "r")).rejects.toThrow("audit write failed");
+    expect(session.aborted).toBe(true);
+    expect(session.committed).toBe(false);
+    expect(session.ended).toBe(true);
+    expect(m.orderFindById).not.toHaveBeenCalled(); // no success response was built
+  });
+
+  it("if the order write itself fails, no audit is written and the transaction aborts", async () => {
+    const session = fakeSession();
+    m.startSession.mockResolvedValue(session);
+    m.orderFindOneAndUpdate.mockReturnValue({ lean: () => Promise.reject(new Error("write failed")) });
+    await expect(cancelOrder(actor, id.toString(), "r")).rejects.toThrow("write failed");
+    expect(m.auditCreate).not.toHaveBeenCalled();
+    expect(session.aborted).toBe(true);
+    expect(session.committed).toBe(false);
   });
 
   it.each([
@@ -187,26 +247,59 @@ describe("cancelOrder", () => {
     ["returned", { status: "returned", delivery: { status: "resolved" } }, "ORDER_NOT_CANCELLABLE"],
     ["preparing but assigned to a run", { status: "preparing", delivery: { status: "assigned" } }, "ORDER_IN_DELIVERY"],
     ["preparing but emergency-cancelled", { status: "preparing", delivery: { status: "emergency_cancelled" } }, "ORDER_IN_DELIVERY"],
-  ])("rejects %s with 409 %s: nothing written, no audit", async (_n, fresh, code) => {
+  ])("rejects %s with 409 %s: no audit is written", async (_n, fresh, code) => {
+    m.startSession.mockResolvedValue(fakeSession());
     m.orderFindOneAndUpdate.mockReturnValue(lean(null));
     m.orderFindById.mockReturnValue(lean(fresh));
     await expectApp(cancelOrder(actor, id.toString(), "r"), code, 409);
     expect(m.auditCreate).not.toHaveBeenCalled();
   });
 
-  it("missing order → 404; malformed id → 404 without a write", async () => {
+  it("a repeated request (the order is already cancelled) writes no second audit", async () => {
+    m.startSession.mockResolvedValue(fakeSession());
+    m.orderFindOneAndUpdate.mockReturnValueOnce(lean({ status: "preparing" })).mockReturnValueOnce(lean(null));
+    arrangeDetail();
+    await cancelOrder(actor, id.toString(), "r");
+    m.orderFindById.mockReturnValue(lean({ status: "cancelled", delivery: { status: "unassigned" } }));
+    await expectApp(cancelOrder(actor, id.toString(), "r"), "ORDER_ALREADY_CANCELLED", 409);
+    expect(m.auditCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("a retried callback (transient error) re-runs from a clean slate and still audits exactly the committed attempt", async () => {
+    const session = { ...fakeSession(), withTransaction: async (fn: () => Promise<void>) => { await fn(); await fn(); } };
+    m.startSession.mockResolvedValue(session);
+    m.orderFindOneAndUpdate.mockReturnValueOnce(lean({ status: "preparing" })).mockReturnValueOnce(lean(null));
+    arrangeDetail();
+    // second attempt matches nothing (simulating a lost race on retry) → reported as not cancelled
+    m.orderFindById.mockReturnValue(lean({ status: "preparing", delivery: { status: "assigned" } }));
+    await expectApp(cancelOrder(actor, id.toString(), "r"), "ORDER_IN_DELIVERY", 409);
+  });
+
+  it("missing order → 404; malformed id → 404 without opening a transaction", async () => {
+    m.startSession.mockResolvedValue(fakeSession());
     m.orderFindOneAndUpdate.mockReturnValue(lean(null));
     m.orderFindById.mockReturnValue(lean(null));
     await expectApp(cancelOrder(actor, id.toString(), "r"), "ORDER_NOT_FOUND", 404);
-    m.orderFindOneAndUpdate.mockClear();
+    m.startSession.mockClear();
     await expectApp(cancelOrder(actor, "zzz", "r"), "ORDER_NOT_FOUND", 404);
-    expect(m.orderFindOneAndUpdate).not.toHaveBeenCalled();
+    expect(m.startSession).not.toHaveBeenCalled();
     expect(m.auditCreate).not.toHaveBeenCalled();
   });
 
-  it("race: the order was assigned between the admin's page load and the write → the conditional write matches nothing → 409 ORDER_IN_DELIVERY (the cancel loses cleanly)", async () => {
+  it("race: the order was assigned between the admin's page load and the write → the conditional write matches nothing → 409 ORDER_IN_DELIVERY, nothing audited", async () => {
+    m.startSession.mockResolvedValue(fakeSession());
     m.orderFindOneAndUpdate.mockReturnValue(lean(null));
     m.orderFindById.mockReturnValue(lean({ status: "preparing", delivery: { status: "assigned" } }));
     await expectApp(cancelOrder(actor, id.toString(), "r"), "ORDER_IN_DELIVERY", 409);
+    expect(m.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("a standalone mongod (no transactions) is a plain Error, never a non-atomic fallback", async () => {
+    m.startSession.mockResolvedValue({ withTransaction: async () => { throw Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 }); }, endSession: vi.fn() });
+    const err = await cancelOrder(actor, id.toString(), "r").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { name: string }).name).not.toBe("AppError");
+    expect(m.orderFindOneAndUpdate).not.toHaveBeenCalled();
+    expect(m.auditCreate).not.toHaveBeenCalled();
   });
 });
