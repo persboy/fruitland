@@ -49,6 +49,7 @@ Next.js 16.3.5، React 19، TypeScript 5.7 (strict)، Tailwind CSS v4، Zod، Mo
 - `npm install` روی کل مونوریپو — موفق.
 - `npm run typecheck` در هر دو workspace (`app`, `@fruitland/shared`) — بدون خطا.
 - `npm run lint` (ESLint) در `app` — بدون خطا و بدون warning.
+- **alias `@/` در `app/vitest.config.ts`:** باید با `fileURLToPath(new URL("./src", import.meta.url))` ساخته شود، نه `new URL(...).pathname`. روش `.pathname` برای مسیرهای دارای فاصله (مثل `C:\Users\Mohamad Persboy\...`) مسیر `%20` می‌دهد و ۳۴ فایل تست بدون اجرا fail می‌شدند. بازتولید و رفع در مسیر دارای فاصله روی لینوکس تأیید شد: `npm run verify` کامل (۸۰ فایل، ۱۵۵۰ تست، build) پاس شد. اجرای مجدد روی ویندوز توسط کاربر هنوز لازم است.
 - تست‌های واحد (Vitest):
   - `packages/shared`: ۵۱ تست (money.ts، jalali.ts، phone.ts، domain/enums.ts) — پاس.
   - `app`: ۷۳ تست (apiResponse/AppError، env validation، ۱۸ مدل Mongoose، password.ts، jwt.ts، apiClient.ts) — پاس.
